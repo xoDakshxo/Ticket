@@ -80,7 +80,7 @@ export const suggestTickets = functions
 
     // Call Gemini to analyze and generate suggestions
     const gemini = getGeminiClient();
-    const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
     const prompt = `You are a product manager analyzing user feedback to create actionable tickets.
 

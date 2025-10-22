@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Plus, Trash2, Loader2, AlertTriangle, CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 interface DataSource {
   id: string;
@@ -38,28 +38,7 @@ export const DataSourcesManager = () => {
   });
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchSources();
-
-    // Real-time subscription to feedback sources
-    const channel = firebase
-      .channel('feedback-sources-changes')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'feedback_sources'
-      }, (payload) => {
-        console.log('Feedback source changed:', payload);
-        // Could update counts or stats here if needed
-      })
-      .subscribe();
-
-    return () => {
-      firebase.removeChannel(channel);
-    };
-  }, []);
-
-  const fetchSources = async () => {
+  const fetchSources = useCallback(async () => {
     try {
       const { data: { user } } = await firebase.auth.getUser();
       if (!user) return;
@@ -73,16 +52,36 @@ export const DataSourcesManager = () => {
 
       if (error) throw error;
       setSources((data || []) as unknown as DataSource[]);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    fetchSources();
+
+    // Real-time subscription to feedback sources
+    const channel = firebase
+      .channel('feedback-sources-changes')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'feedback_sources'
+      }, () => {
+        fetchSources();
+      })
+      .subscribe();
+
+    return () => {
+      firebase.removeChannel(channel);
+    };
+  }, [fetchSources]);
 
   const addSource = async () => {
     if (!newSubreddit.trim()) {
@@ -211,10 +210,10 @@ export const DataSourcesManager = () => {
 
       setNewSubreddit("");
       fetchSources();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -238,10 +237,10 @@ export const DataSourcesManager = () => {
       });
 
       fetchSources();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -267,10 +266,10 @@ export const DataSourcesManager = () => {
         title: "Feedback Cleared",
         description: "All feedback data has been removed",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {

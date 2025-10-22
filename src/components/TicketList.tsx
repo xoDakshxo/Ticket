@@ -1,27 +1,37 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { firebase } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-
-interface Ticket {
-  id: string;
-  title: string;
-  description: string;
-  state: string;
-  priority: string;
-  owner: string | null;
-  impact_score: number;
-  export_status: string | null;
-  created_at: string;
-}
+import { getErrorMessage } from "@/lib/utils";
+import type { Ticket, TicketPriority } from "@/types/firestore";
 
 const TicketList = () => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+
+  const fetchTickets = useCallback(async () => {
+    try {
+      const { data, error } = await firebase
+        .from<Ticket>('tickets')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setTickets(data || []);
+    } catch (error: unknown) {
+      toast({
+        title: "Error",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
     fetchTickets();
@@ -40,32 +50,12 @@ const TicketList = () => {
     return () => {
       firebase.removeChannel(channel);
     };
-  }, []);
-
-  const fetchTickets = async () => {
-    try {
-      const { data, error } = await firebase
-        .from('tickets')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setTickets(data || []);
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [fetchTickets]);
 
   const updateTicketState = async (ticketId: string, newState: string) => {
     try {
       const { error } = await firebase
-        .from('tickets')
+        .from<Ticket>('tickets')
         .update({ state: newState })
         .eq('id', ticketId);
 
@@ -75,16 +65,16 @@ const TicketList = () => {
         title: "Success",
         description: "Ticket updated successfully",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     }
   };
 
-  const getPriorityColor = (priority: string) => {
+  const getPriorityColor = (priority: TicketPriority) => {
     switch (priority) {
       case 'critical': return 'destructive';
       case 'high': return 'default';

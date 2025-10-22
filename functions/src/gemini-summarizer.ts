@@ -16,6 +16,9 @@ interface GeminiSummaryItem {
 
 // Initialize Gemini
 let genAI: GoogleGenerativeAI;
+const GEMINI_MODEL = functions.config().gemini?.model
+  || process.env.GEMINI_MODEL
+  || 'gemini-2.5-flash';
 
 function getGeminiClient(): GoogleGenerativeAI {
   if (!genAI) {
@@ -38,7 +41,8 @@ const BATCH_SIZE = 5;
  */
 async function summarizeSinglePost(post: RedditPost): Promise<SummarizedPost> {
   const gemini = getGeminiClient();
-  const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  console.log('[gemini] summarizeSinglePost model', GEMINI_MODEL);
+  const model = gemini.getGenerativeModel({ model: GEMINI_MODEL });
 
   const fullText = `${post.title}\n\n${post.selftext || ''}`.trim();
 
@@ -95,7 +99,7 @@ Return ONLY valid JSON, no markdown formatting.`;
 export async function summarizeRedditPosts(posts: RedditPost[]): Promise<Map<string, SummarizedPost>> {
   const summaries = new Map<string, SummarizedPost>();
 
-  console.log(`Starting summarization of ${posts.length} posts using Gemini...`);
+  console.log(`Starting summarization of ${posts.length} posts using Gemini model ${GEMINI_MODEL}...`);
 
   // Process in batches to avoid rate limits
   for (let i = 0; i < posts.length; i += BATCH_SIZE) {
@@ -157,7 +161,8 @@ export function formatPostContent(post: RedditPost, summary: SummarizedPost): st
  */
 export async function bulkSummarizeWithContext(posts: RedditPost[]): Promise<Map<string, SummarizedPost>> {
   const gemini = getGeminiClient();
-  const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  console.log('[gemini] bulkSummarizeWithContext model', GEMINI_MODEL);
+  const model = gemini.getGenerativeModel({ model: GEMINI_MODEL });
 
   const summaries = new Map<string, SummarizedPost>();
 

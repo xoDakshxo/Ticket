@@ -1,14 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  Users, 
-  ExternalLink, 
-  MessageSquare, 
+import {
+  Users,
+  ExternalLink,
+  MessageSquare,
   RefreshCw,
   Sparkles,
   Award,
@@ -24,26 +24,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-
-interface UserProfile {
-  id: string;
-  author: string;
-  source: string;
-  total_feedback_count: number;
-  total_engagement: number;
-  avg_engagement: number;
-  follower_count: number;
-  superuser_score: number;
-  feedback_quality_score: number;
-  feedback_frequency_score: number;
-  archetype: string;
-  archetype_confidence: number;
-  profile_url: string | null;
-  linked_suggestions: number;
-  approved_suggestions: number;
-  first_seen_at: string;
-  last_seen_at: string;
-}
+import { getErrorMessage } from "@/lib/utils";
+import type { UserProfile } from "@/types/firestore";
 
 export function CommunityChampions() {
   const [superusers, setSuperusers] = useState<UserProfile[]>([]);
@@ -53,6 +35,35 @@ export function CommunityChampions() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [outreachMessage, setOutreachMessage] = useState("");
   const { toast } = useToast();
+
+  const fetchSuperusers = useCallback(async () => {
+    try {
+      // Fetch top 20% of users by score (minimum 10 users, maximum 50)
+      const { count } = await firebase
+        .from('user_profiles')
+        .select('*', { count: 'exact', head: true });
+      
+      const topPercentCount = Math.min(Math.max(Math.floor((count || 0) * 0.2), 10), 50);
+
+      const { data, error } = await firebase
+        .from('user_profiles')
+        .select('*')
+        .order('superuser_score', { ascending: false })
+        .limit(topPercentCount);
+
+      if (error) throw error;
+      setSuperusers(data || []);
+    } catch (error: unknown) {
+      console.error('Error fetching superusers:', error);
+      toast({
+        title: "Error",
+        description: getErrorMessage(error) || "Failed to load community champions",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
     fetchSuperusers();
@@ -71,36 +82,7 @@ export function CommunityChampions() {
     return () => {
       firebase.removeChannel(channel);
     };
-  }, []);
-
-  const fetchSuperusers = async () => {
-    try {
-      // Fetch top 20% of users by score (minimum 10 users, maximum 50)
-      const { count } = await firebase
-        .from('user_profiles')
-        .select('*', { count: 'exact', head: true });
-      
-      const topPercentCount = Math.min(Math.max(Math.floor((count || 0) * 0.2), 10), 50);
-
-      const { data, error } = await firebase
-        .from('user_profiles')
-        .select('*')
-        .order('superuser_score', { ascending: false })
-        .limit(topPercentCount);
-
-      if (error) throw error;
-      setSuperusers(data || []);
-    } catch (error: any) {
-      console.error('Error fetching superusers:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load community champions",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [fetchSuperusers]);
 
   const handleAnalyze = async () => {
     try {
@@ -120,11 +102,11 @@ export function CommunityChampions() {
       });
 
       await fetchSuperusers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error analyzing users:', error);
       toast({
         title: "Error",
-        description: error.message || "Failed to analyze users",
+        description: getErrorMessage(error) || "Failed to analyze users",
         variant: "destructive"
       });
     } finally {
@@ -161,11 +143,11 @@ export function CommunityChampions() {
       });
 
       setOutreachModalOpen(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error logging outreach:', error);
       toast({
         title: "Error",
-        description: "Failed to log outreach attempt",
+        description: getErrorMessage(error) || "Failed to log outreach attempt",
         variant: "destructive"
       });
     }

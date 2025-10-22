@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,76 +13,50 @@ import { ExternalLink, Trash2 } from "lucide-react";
 import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { TicketSuggestions } from "@/components/TicketSuggestions";
-type LinkedFeedback = {
-  id: string;
-  author: string;
-  content: string;
+import { getErrorMessage } from "@/lib/utils";
+import type { Ticket, TicketFeedbackLink, FeedbackSource, TicketState, TicketPriority } from "@/types/firestore";
+
+type LinkedFeedback = FeedbackSource & {
   external_id: string;
   channel: string;
+  author: string;
   created_at: string;
 };
 export default function Tickets() {
-  const [tickets, setTickets] = useState<any[]>([]);
-  const [selectedTicket, setSelectedTicket] = useState<any>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [linkedFeedback, setLinkedFeedback] = useState<LinkedFeedback[]>([]);
   const [filter, setFilter] = useState("all");
   const {
     toast
   } = useToast();
-  useEffect(() => {
-    fetchTickets();
-    const channel = firebase.channel('tickets-changes').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'tickets'
-    }, payload => {
-      // Apply minimal local updates for snappier UI
-      if (payload.eventType === 'DELETE') {
-        setTickets(prev => prev.filter(t => t.id !== (payload.old as any)?.id));
-        if (selectedTicket?.id === (payload.old as any)?.id) {
-          setSelectedTicket(null);
-        }
-      } else {
-        // Fallback to full refresh for INSERT/UPDATE
-        fetchTickets();
-      }
-    }).subscribe();
-    return () => {
-      firebase.removeChannel(channel);
-    };
-  }, []);
-  useEffect(() => {
-    if (selectedTicket) {
-      fetchLinkedFeedback(selectedTicket.id);
-    }
-  }, [selectedTicket]);
-  const fetchTickets = async () => {
+  const fetchTickets = useCallback(async () => {
     try {
-      const {
-        data,
-        error
-      } = await firebase.from('tickets').select('*').order('created_at', {
-        ascending: false
-      });
+      const { data, error } = await firebase
+        .from<Ticket>('tickets')
+        .select('*')
+        .order('created_at', {
+          ascending: false
+        });
       if (error) throw error;
       setTickets(data || []);
       if (data?.length && !selectedTicket) {
         setSelectedTicket(data[0]);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive"
       });
     }
-  };
-  const fetchLinkedFeedback = async (ticketId: string) => {
+  }, [selectedTicket, toast]);
+  const fetchLinkedFeedback = useCallback(async (ticketId: string) => {
     try {
       const {
         data,
         error
-      } = await firebase.from('ticket_feedback_links').select(`
+      } = await firebase.from<TicketFeedbackLink>('ticket_feedback_links').select(`
           feedback_id,
           feedback_sources (
             id,
@@ -94,18 +68,34 @@ export default function Tickets() {
           )
         `).eq('ticket_id', ticketId);
       if (error) throw error;
-      const feedback = data?.map((link: any) => link.feedback_sources).filter(Boolean) || [];
-      setLinkedFeedback(feedback);
-    } catch (error: any) {
+      const feedback = data?.map((link) => link.feedback_sources).filter(Boolean) as LinkedFeedback[] | undefined;
+      setLinkedFeedback(feedback ?? []);
+    } catch (error: unknown) {
       console.error('Error fetching linked feedback:', error);
       setLinkedFeedback([]);
     }
-  };
-  const updateTicket = async (ticketId: string, updates: any) => {
+  }, []);
+  useEffect(() => {
+    fetchTickets();
+    const channel = firebase.channel('tickets-changes').on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'tickets'
+    }, () => {
+      fetchTickets();
+    }).subscribe();
+    return () => {
+      firebase.removeChannel(channel);
+    };
+  }, [fetchTickets]);
+  useEffect(() => {
+    if (selectedTicket) {
+      fetchLinkedFeedback(selectedTicket.id);
+    }
+  }, [fetchLinkedFeedback, selectedTicket]);
+  const updateTicket = async (ticketId: string, updates: Partial<Ticket>) => {
     try {
-      const {
-        error
-      } = await firebase.from('tickets').update(updates).eq('id', ticketId);
+      const { error } = await firebase.from<Ticket>('tickets').update(updates).eq('id', ticketId);
       if (error) throw error;
 
       // Celebrate if marking as done
@@ -116,19 +106,17 @@ export default function Tickets() {
         });
       }
       fetchTickets();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive"
       });
     }
   };
   const deleteTicket = async (ticketId: string) => {
     try {
-      const {
-        error
-      } = await firebase.from('tickets').delete().eq('id', ticketId);
+      const { error } = await firebase.from<Ticket>('tickets').delete().eq('id', ticketId);
       if (error) throw error;
 
       // Optimistically update UI
@@ -144,16 +132,16 @@ export default function Tickets() {
         title: "Ticket deleted",
         description: "The ticket has been removed"
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive"
       });
     }
   };
-  const getPriorityBadge = (priority: string) => {
-    const variants: any = {
+  const getPriorityBadge = (priority: TicketPriority) => {
+    const variants: Record<string, "destructive" | "default" | "secondary" | "outline"> = {
       critical: "destructive",
       high: "default",
       medium: "secondary",
@@ -161,7 +149,7 @@ export default function Tickets() {
     };
     return <Badge variant={variants[priority] || "outline"}>P{priority === "critical" ? "0" : priority === "high" ? "1" : priority === "medium" ? "2" : "3"}</Badge>;
   };
-  const getStateBadge = (state: string) => {
+  const getStateBadge = (state: TicketState) => {
     return <Badge variant={state === "done" ? "default" : "secondary"}>{state}</Badge>;
   };
   const filteredTickets = tickets.filter(t => {

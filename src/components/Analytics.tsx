@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { firebase } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/utils";
+import type { Ticket } from "@/types/firestore";
 
 interface Metrics {
   totalClusters: number;
@@ -24,21 +26,18 @@ const Analytics = () => {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchMetrics();
-  }, []);
-
-  const fetchMetrics = async () => {
+  const fetchMetrics = useCallback(async () => {
     try {
+      type ClusterRecord = { id: string; status?: string };
       const [clusters, tickets, events, feedback] = await Promise.all([
-        firebase.from('clusters').select('status', { count: 'exact' }),
-        firebase.from('tickets').select('state', { count: 'exact' }),
+        firebase.from<ClusterRecord>('clusters').select('status', { count: 'exact' }),
+        firebase.from<Ticket>('tickets').select('state', { count: 'exact' }),
         firebase.from('events').select('*', { count: 'exact' }),
         firebase.from('feedback_sources').select('*', { count: 'exact' }),
       ]);
 
-      const activeClusters = clusters.data?.filter((c: any) => c.status === 'active').length || 0;
-      const openTickets = tickets.data?.filter((t: any) => t.state === 'open').length || 0;
+      const activeClusters = clusters.data?.filter((cluster) => cluster.status === 'active').length ?? 0;
+      const openTickets = tickets.data?.filter((ticket) => ticket.state === 'open').length ?? 0;
 
       setMetrics({
         totalClusters: clusters.count || 0,
@@ -48,16 +47,20 @@ const Analytics = () => {
         totalEvents: events.count || 0,
         feedbackIngested: feedback.count || 0,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    fetchMetrics();
+  }, [fetchMetrics]);
 
   if (loading) {
     return <div>Loading analytics...</div>;
