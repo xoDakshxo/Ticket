@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +42,7 @@ export const DataSourcesManager = () => {
     fetchSources();
 
     // Real-time subscription to feedback sources
-    const channel = supabase
+    const channel = firebase
       .channel('feedback-sources-changes')
       .on('postgres_changes', {
         event: '*',
@@ -55,16 +55,16 @@ export const DataSourcesManager = () => {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      firebase.removeChannel(channel);
     };
   }, []);
 
   const fetchSources = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await firebase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
+      const { data, error } = await firebase
         .from('integration_configs')
         .select('*')
         .eq('user_id', user.id)
@@ -96,7 +96,7 @@ export const DataSourcesManager = () => {
 
     setAdding(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await firebase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
       // Clean up subreddit name (remove r/ prefix if present)
@@ -115,7 +115,7 @@ export const DataSourcesManager = () => {
         return;
       }
 
-      const { data: insertData, error } = await supabase
+      const { data: insertData, error } = await firebase
         .from('integration_configs')
         .insert({
           user_id: user.id,
@@ -154,7 +154,7 @@ export const DataSourcesManager = () => {
       }, 1500);
 
       // Start background sync
-      supabase.functions.invoke('reddit-sync', {
+      firebase.functions.invoke('redditSync', {
         body: { 
           subreddit: cleanSubreddit,
           user_id: user.id,
@@ -194,7 +194,7 @@ export const DataSourcesManager = () => {
                 description: "Generating ticket suggestions from new data",
               });
 
-              supabase.functions.invoke('suggest-tickets').then(({ data: suggestData, error: suggestError }) => {
+              firebase.functions.invoke('suggestTickets').then(({ data: suggestData, error: suggestError }) => {
                 if (suggestError) {
                   console.error('Auto-suggest error:', suggestError);
                 } else if (suggestData?.suggestions) {
@@ -225,7 +225,7 @@ export const DataSourcesManager = () => {
   const removeSource = async (id: string, subreddit: string) => {
     setRemovingId(id);
     try {
-      const { error } = await supabase
+      const { error } = await firebase
         .from('integration_configs')
         .delete()
         .eq('id', id);
@@ -256,7 +256,7 @@ export const DataSourcesManager = () => {
 
     setClearingFeedback(true);
     try {
-      const { error } = await supabase
+      const { error } = await firebase
         .from('feedback_sources')
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows

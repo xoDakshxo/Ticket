@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { Sparkles, ExternalLink, ThumbsUp, ThumbsDown, RefreshCw, Filter, TrendingUp, Zap } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -58,7 +58,7 @@ export function TicketSuggestions({
     fetchExistingSuggestions();
 
     // Real-time subscription
-    const channel = supabase.channel('ticket-suggestions-changes').on('postgres_changes', {
+    const channel = firebase.channel('ticket-suggestions-changes').on('postgres_changes', {
       event: '*',
       schema: 'public',
       table: 'ticket_suggestions'
@@ -66,7 +66,7 @@ export function TicketSuggestions({
       fetchExistingSuggestions();
     }).subscribe();
     return () => {
-      supabase.removeChannel(channel);
+      firebase.removeChannel(channel);
     };
   }, []);
   const fetchExistingSuggestions = async () => {
@@ -74,7 +74,7 @@ export function TicketSuggestions({
       const {
         data,
         error
-      } = await supabase.from('ticket_suggestions').select('*').eq('status', 'pending').order('impact_score', {
+      } = await firebase.from('ticket_suggestions').select('*').eq('status', 'pending').order('impact_score', {
         ascending: false
       });
       if (error) throw error;
@@ -95,7 +95,7 @@ export function TicketSuggestions({
       const {
         data,
         error
-      } = await supabase.functions.invoke('suggest-tickets');
+      } = await firebase.functions.invoke('suggest-tickets');
       if (error) throw error;
       if (data?.suggestions) {
         // Refresh from database to get the newly created suggestions
@@ -138,7 +138,7 @@ export function TicketSuggestions({
       const {
         data: ticket,
         error: ticketError
-      } = await supabase.from('tickets').insert({
+      } = await firebase.from('tickets').insert({
         title: suggestion.title,
         description: suggestion.description,
         priority: suggestion.priority,
@@ -155,14 +155,14 @@ export function TicketSuggestions({
         }));
         const {
           error: linkError
-        } = await supabase.from('ticket_feedback_links').insert(links);
+        } = await firebase.from('ticket_feedback_links').insert(links);
         if (linkError) console.error('Error linking feedback:', linkError);
       }
 
       // Update suggestion status to approved
       const {
         error: updateError
-      } = await supabase.from('ticket_suggestions').update({
+      } = await firebase.from('ticket_suggestions').update({
         status: 'approved'
       }).eq('id', suggestion.id);
       if (updateError) throw updateError;
@@ -197,7 +197,7 @@ export function TicketSuggestions({
     if (!suggestionToDecline) return;
     
     try {
-      const { error } = await supabase
+      const { error } = await firebase
         .from('ticket_suggestions')
         .update({ 
           status: 'declined',

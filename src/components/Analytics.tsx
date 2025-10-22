@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 
@@ -31,10 +31,10 @@ const Analytics = () => {
   const fetchMetrics = async () => {
     try {
       const [clusters, tickets, events, feedback] = await Promise.all([
-        (supabase as any).from('clusters').select('status', { count: 'exact' }),
-        (supabase as any).from('tickets').select('state', { count: 'exact' }),
-        (supabase as any).from('events').select('*', { count: 'exact' }),
-        (supabase as any).from('feedback_sources').select('*', { count: 'exact' }),
+        firebase.from('clusters').select('status', { count: 'exact' }),
+        firebase.from('tickets').select('state', { count: 'exact' }),
+        firebase.from('events').select('*', { count: 'exact' }),
+        firebase.from('feedback_sources').select('*', { count: 'exact' }),
       ]);
 
       const activeClusters = clusters.data?.filter((c: any) => c.status === 'active').length || 0;

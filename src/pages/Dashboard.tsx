@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { DataSourcesManager } from "@/components/DataSourcesManager";
 import { TicketSuggestions } from "@/components/TicketSuggestions";
 import { CommunityChampions } from "@/components/CommunityChampions";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { MessageSquare, Ticket, Sparkles, RefreshCw, TrendingUp } from "lucide-react";
 export default function Dashboard() {
@@ -21,21 +21,21 @@ export default function Dashboard() {
     fetchStats();
 
     // Real-time subscriptions
-    const feedbackChannel = supabase.channel('feedback-changes').on('postgres_changes', {
+    const feedbackChannel = firebase.channel('feedback-changes').on('postgres_changes', {
       event: '*',
       schema: 'public',
       table: 'feedback_sources'
     }, () => {
       fetchStats();
     }).subscribe();
-    const ticketsChannel = supabase.channel('tickets-changes').on('postgres_changes', {
+    const ticketsChannel = firebase.channel('tickets-changes').on('postgres_changes', {
       event: '*',
       schema: 'public',
       table: 'tickets'
     }, () => {
       fetchStats();
     }).subscribe();
-    const suggestionsChannel = supabase.channel('suggestions-changes').on('postgres_changes', {
+    const suggestionsChannel = firebase.channel('suggestions-changes').on('postgres_changes', {
       event: '*',
       schema: 'public',
       table: 'ticket_suggestions'
@@ -43,9 +43,9 @@ export default function Dashboard() {
       fetchStats();
     }).subscribe();
     return () => {
-      supabase.removeChannel(feedbackChannel);
-      supabase.removeChannel(ticketsChannel);
-      supabase.removeChannel(suggestionsChannel);
+      firebase.removeChannel(feedbackChannel);
+      firebase.removeChannel(ticketsChannel);
+      firebase.removeChannel(suggestionsChannel);
     };
   }, []);
   const fetchStats = async () => {
@@ -53,7 +53,7 @@ export default function Dashboard() {
       // Get total feedback count
       const {
         count: feedbackCount
-      } = await supabase.from('feedback_sources').select('*', {
+      } = await firebase.from('feedback_sources').select('*', {
         count: 'exact',
         head: true
       });
@@ -61,17 +61,17 @@ export default function Dashboard() {
       // Get pending suggestions count
       const {
         count: suggestionsCount
-      } = await supabase.from('ticket_suggestions').select('*', {
+      } = await firebase.from('ticket_suggestions').select('*', {
         count: 'exact',
         head: true
       }).eq('status', 'pending');
 
       // Get created tickets count
-      const { count: ticketsCount } = await supabase
+      const { count: ticketsCount } = await firebase
         .from('tickets')
         .select('*', { count: 'exact', head: true });
 
-      const { count: trendingCount } = await supabase
+      const { count: trendingCount } = await firebase
         .from('ticket_suggestions')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'pending')
@@ -91,7 +91,7 @@ export default function Dashboard() {
   const handleGenerateSuggestions = async () => {
     try {
       setGenerating(true);
-      const { data, error } = await supabase.functions.invoke('suggest-tickets');
+      const { data, error } = await firebase.functions.invoke('suggest-tickets');
       
       if (error) throw error;
       

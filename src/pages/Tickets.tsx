@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ExternalLink, Trash2 } from "lucide-react";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { TicketSuggestions } from "@/components/TicketSuggestions";
 type LinkedFeedback = {
@@ -31,7 +31,7 @@ export default function Tickets() {
   } = useToast();
   useEffect(() => {
     fetchTickets();
-    const channel = supabase.channel('tickets-changes').on('postgres_changes', {
+    const channel = firebase.channel('tickets-changes').on('postgres_changes', {
       event: '*',
       schema: 'public',
       table: 'tickets'
@@ -48,7 +48,7 @@ export default function Tickets() {
       }
     }).subscribe();
     return () => {
-      supabase.removeChannel(channel);
+      firebase.removeChannel(channel);
     };
   }, []);
   useEffect(() => {
@@ -61,7 +61,7 @@ export default function Tickets() {
       const {
         data,
         error
-      } = await (supabase as any).from('tickets').select('*').order('created_at', {
+      } = await firebase.from('tickets').select('*').order('created_at', {
         ascending: false
       });
       if (error) throw error;
@@ -82,7 +82,7 @@ export default function Tickets() {
       const {
         data,
         error
-      } = await supabase.from('ticket_feedback_links').select(`
+      } = await firebase.from('ticket_feedback_links').select(`
           feedback_id,
           feedback_sources (
             id,
@@ -105,7 +105,7 @@ export default function Tickets() {
     try {
       const {
         error
-      } = await (supabase as any).from('tickets').update(updates).eq('id', ticketId);
+      } = await firebase.from('tickets').update(updates).eq('id', ticketId);
       if (error) throw error;
 
       // Celebrate if marking as done
@@ -128,7 +128,7 @@ export default function Tickets() {
     try {
       const {
         error
-      } = await supabase.from('tickets').delete().eq('id', ticketId);
+      } = await firebase.from('tickets').delete().eq('id', ticketId);
       if (error) throw error;
 
       // Optimistically update UI

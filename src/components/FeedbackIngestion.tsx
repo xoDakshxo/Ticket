@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,7 +22,7 @@ const FeedbackIngestion = () => {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('ingest-feedback', {
+      const { data, error } = await firebase.functions.invoke('ingest-feedback', {
         body: {
           source_type: sourceType,
           external_id: `manual-${Date.now()}`,
@@ -58,7 +58,7 @@ const FeedbackIngestion = () => {
     setClusterLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('cluster-feedback');
+      const { data, error } = await firebase.functions.invoke('cluster-feedback');
 
       if (error) throw error;
 

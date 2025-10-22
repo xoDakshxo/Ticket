@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Users, 
@@ -57,7 +57,7 @@ export function CommunityChampions() {
   useEffect(() => {
     fetchSuperusers();
 
-    const channel = supabase
+    const channel = firebase
       .channel('user-profiles-changes')
       .on('postgres_changes', {
         event: '*',
@@ -69,20 +69,20 @@ export function CommunityChampions() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      firebase.removeChannel(channel);
     };
   }, []);
 
   const fetchSuperusers = async () => {
     try {
       // Fetch top 20% of users by score (minimum 10 users, maximum 50)
-      const { count } = await supabase
+      const { count } = await firebase
         .from('user_profiles')
         .select('*', { count: 'exact', head: true });
       
       const topPercentCount = Math.min(Math.max(Math.floor((count || 0) * 0.2), 10), 50);
 
-      const { data, error } = await supabase
+      const { data, error } = await firebase
         .from('user_profiles')
         .select('*')
         .order('superuser_score', { ascending: false })
@@ -110,7 +110,7 @@ export function CommunityChampions() {
         description: "Calculating superuser scores and archetypes"
       });
 
-      const { data, error } = await supabase.functions.invoke('analyze-user-intelligence');
+      const { data, error } = await firebase.functions.invoke('analyze-user-intelligence');
       
       if (error) throw error;
 
@@ -144,7 +144,7 @@ export function CommunityChampions() {
     if (!selectedUser) return;
 
     try {
-      const { error } = await supabase
+      const { error } = await firebase
         .from('outreach_log')
         .insert({
           user_profile_id: selectedUser.id,
