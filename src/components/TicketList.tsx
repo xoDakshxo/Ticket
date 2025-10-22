@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,7 @@ const TicketList = () => {
   useEffect(() => {
     fetchTickets();
 
-    const channel = supabase
+    const channel = firebase
       .channel('tickets-changes')
       .on(
         'postgres_changes',
@@ -38,13 +38,13 @@ const TicketList = () => {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      firebase.removeChannel(channel);
     };
   }, []);
 
   const fetchTickets = async () => {
     try {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await firebase
         .from('tickets')
         .select('*')
         .order('created_at', { ascending: false });
@@ -64,7 +64,7 @@ const TicketList = () => {
 
   const updateTicketState = async (ticketId: string, newState: string) => {
     try {
-      const { error } = await (supabase as any)
+      const { error } = await firebase
         .from('tickets')
         .update({ state: newState })
         .eq('id', ticketId);

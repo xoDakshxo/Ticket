@@ -1,0 +1,111 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "state", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "priority", "order": "DESCENDING" },
+        { "fieldPath": "impact_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ticket_suggestions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "impact_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ticket_suggestions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "is_trending", "order": "ASCENDING" },
+        { "fieldPath": "velocity_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "feedback_sources",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "feedback_sources",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "channel", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "user_profiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "superuser_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "user_profiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archetype", "order": "ASCENDING" },
+        { "fieldPath": "superuser_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "integration_configs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "is_active", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "feedback_sources",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "clusters",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "impact_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "event_type", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "user_id", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

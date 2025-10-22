@@ -1,6 +1,6 @@
 // Firebase configuration and initialization
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
 import {
   getFirestore,
   collection,
@@ -14,13 +14,12 @@ import {
   where,
   orderBy,
   onSnapshot,
-  Timestamp,
+  serverTimestamp,
   QueryConstraint,
-  serverTimestamp
+  Unsubscribe,
 } from 'firebase/firestore';
 
-// Firebase configuration
-// These values come from your Firebase Console
+// Firebase configuration from environment variables
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -33,11 +32,23 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const firestore = getFirestore(app);
 
-// Auth API
+// Type definitions for better TypeScript support
+interface FirebaseResponse<T> {
+  data: T | null;
+  error: { message: string } | null;
+}
+
+interface FirebaseQueryResponse<T> {
+  data: T[];
+  count: number;
+  error: { message: string } | null;
+}
+
+// Authentication API
 export const firebaseAuth = {
-  signUp: async (email: string, password: string) => {
+  signUp: async (email: string, password: string): Promise<FirebaseResponse<{ user: User }>> => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       return { data: { user: userCredential.user }, error: null };
@@ -46,7 +57,7 @@ export const firebaseAuth = {
     }
   },
 
-  signInWithPassword: async (email: string, password: string) => {
+  signInWithPassword: async (email: string, password: string): Promise<FirebaseResponse<{ user: User }>> => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       return { data: { user: userCredential.user }, error: null };
@@ -55,149 +66,193 @@ export const firebaseAuth = {
     }
   },
 
-  signOut: async () => {
+  signOut: async (): Promise<FirebaseResponse<null>> => {
     try {
-      await signOut(auth);
-      return { error: null };
-    } catch (error: any) {
-      return { error: { message: error.message } };
-    }
-  },
-
-  getUser: () => {
-    return { data: { user: auth.currentUser }, error: null };
-  },
-
-  onAuthStateChange: (callback: (user: any) => void) => {
-    return onAuthStateChanged(auth, callback);
-  }
-};
-
-// Generic Firestore operations
-const firestoreOperations = {
-  // Get all documents from a collection
-  getAll: async (collectionName: string, ...constraints: QueryConstraint[]) => {
-    try {
-      const q = constraints.length > 0
-        ? query(collection(db, collectionName), ...constraints)
-        : query(collection(db, collectionName));
-
-      const snapshot = await getDocs(q);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      return { data, count: data.length, error: null };
-    } catch (error: any) {
-      return { data: [], count: 0, error: { message: error.message } };
-    }
-  },
-
-  // Get a single document
-  getOne: async (collectionName: string, docId: string) => {
-    try {
-      const docRef = doc(db, collectionName, docId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        return { data: { id: docSnap.id, ...docSnap.data() }, error: null };
-      } else {
-        return { data: null, error: { message: 'Document not found' } };
-      }
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
-    }
-  },
-
-  // Create a new document
-  create: async (collectionName: string, data: any) => {
-    try {
-      const docRef = await addDoc(collection(db, collectionName), {
-        ...data,
-        created_at: serverTimestamp(),
-        updated_at: serverTimestamp(),
-      });
-      const newDoc = await getDoc(docRef);
-      return { data: { id: newDoc.id, ...newDoc.data() }, error: null };
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
-    }
-  },
-
-  // Update a document
-  update: async (collectionName: string, docId: string, data: any) => {
-    try {
-      const docRef = doc(db, collectionName, docId);
-      await updateDoc(docRef, {
-        ...data,
-        updated_at: serverTimestamp(),
-      });
-      const updatedDoc = await getDoc(docRef);
-      return { data: { id: updatedDoc.id, ...updatedDoc.data() }, error: null };
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
-    }
-  },
-
-  // Delete a document
-  delete: async (collectionName: string, docId: string) => {
-    try {
-      await deleteDoc(doc(db, collectionName, docId));
+      await firebaseSignOut(auth);
       return { data: null, error: null };
     } catch (error: any) {
       return { data: null, error: { message: error.message } };
     }
   },
 
-  // Subscribe to real-time updates
-  subscribe: (collectionName: string, callback: (data: any[]) => void, ...constraints: QueryConstraint[]) => {
-    const q = constraints.length > 0
-      ? query(collection(db, collectionName), ...constraints)
-      : query(collection(db, collectionName));
+  getUser: () => {
+    const user = auth.currentUser;
+    // Map uid to id for Supabase compatibility
+    if (user) {
+      return {
+        data: {
+          user: {
+            ...user,
+            id: user.uid // Add id property for compatibility
+          }
+        },
+        error: null
+      };
+    }
+    return { data: { user: null }, error: null };
+  },
 
-    return onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      callback(data);
-    });
-  }
+  onAuthStateChange: (callback: (user: User | null) => void): Unsubscribe => {
+    return onAuthStateChanged(auth, callback);
+  },
+
+  // Get current user synchronously
+  getCurrentUser: () => auth.currentUser,
 };
 
-// Supabase-compatible API wrapper
-// This mimics the Supabase API structure for easier migration
-export const supabase = {
+// Firestore Database Operations
+export const db = {
+  // Collections helper
+  collection: (name: string) => collection(firestore, name),
+
+  // Get all documents from a collection
+  getAll: async <T = any>(collectionName: string, ...constraints: QueryConstraint[]): Promise<FirebaseQueryResponse<T>> => {
+    try {
+      const q = constraints.length > 0
+        ? query(collection(firestore, collectionName), ...constraints)
+        : collection(firestore, collectionName);
+
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as T));
+      return { data, count: data.length, error: null };
+    } catch (error: any) {
+      console.error(`Error getting documents from ${collectionName}:`, error);
+      return { data: [], count: 0, error: { message: error.message } };
+    }
+  },
+
+  // Get a single document
+  getOne: async <T = any>(collectionName: string, docId: string): Promise<FirebaseResponse<T>> => {
+    try {
+      const docRef = doc(firestore, collectionName, docId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        return { data: { id: docSnap.id, ...docSnap.data() } as T, error: null };
+      } else {
+        return { data: null, error: { message: 'Document not found' } };
+      }
+    } catch (error: any) {
+      console.error(`Error getting document ${docId} from ${collectionName}:`, error);
+      return { data: null, error: { message: error.message } };
+    }
+  },
+
+  // Create a new document
+  create: async <T = any>(collectionName: string, data: any): Promise<FirebaseResponse<T>> => {
+    try {
+      const docRef = await addDoc(collection(firestore, collectionName), {
+        ...data,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+      });
+      const newDoc = await getDoc(docRef);
+      return { data: { id: newDoc.id, ...newDoc.data() } as T, error: null };
+    } catch (error: any) {
+      console.error(`Error creating document in ${collectionName}:`, error);
+      return { data: null, error: { message: error.message } };
+    }
+  },
+
+  // Update a document
+  update: async <T = any>(collectionName: string, docId: string, data: any): Promise<FirebaseResponse<T>> => {
+    try {
+      const docRef = doc(firestore, collectionName, docId);
+      await updateDoc(docRef, {
+        ...data,
+        updated_at: serverTimestamp(),
+      });
+      const updatedDoc = await getDoc(docRef);
+      return { data: { id: updatedDoc.id, ...updatedDoc.data() } as T, error: null };
+    } catch (error: any) {
+      console.error(`Error updating document ${docId} in ${collectionName}:`, error);
+      return { data: null, error: { message: error.message } };
+    }
+  },
+
+  // Delete a document
+  delete: async (collectionName: string, docId: string): Promise<FirebaseResponse<null>> => {
+    try {
+      await deleteDoc(doc(firestore, collectionName, docId));
+      return { data: null, error: null };
+    } catch (error: any) {
+      console.error(`Error deleting document ${docId} from ${collectionName}:`, error);
+      return { data: null, error: { message: error.message } };
+    }
+  },
+
+  // Subscribe to real-time updates
+  subscribe: <T = any>(
+    collectionName: string,
+    callback: (data: T[]) => void,
+    ...constraints: QueryConstraint[]
+  ): Unsubscribe => {
+    const q = constraints.length > 0
+      ? query(collection(firestore, collectionName), ...constraints)
+      : collection(firestore, collectionName);
+
+    return onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as T));
+      callback(data);
+    }, (error) => {
+      console.error(`Error in realtime subscription for ${collectionName}:`, error);
+    });
+  },
+
+  // Query helpers
+  where,
+  orderBy,
+};
+
+// Main Firebase API (compatible interface for migration from Supabase)
+export const firebase = {
   auth: firebaseAuth,
 
   from: (table: string) => ({
     select: (columns: string = '*', options?: any) => {
+      let constraints: QueryConstraint[] = [];
+
       const queryBuilder = {
         data: [] as any[],
         count: 0,
         error: null as any,
 
         eq: function(column: string, value: any) {
-          // Execute the query with filter
-          const execute = async () => {
-            const result = await firestoreOperations.getAll(
-              table,
-              where(column, '==', value)
-            );
-            this.data = result.data;
-            this.count = result.count;
-            this.error = result.error;
-            return this;
-          };
-
-          // Return promise-like object
-          return {
-            ...this,
-            then: (resolve: any, reject?: any) => execute().then(resolve, reject),
-            catch: (reject: any) => execute().catch(reject),
-          };
+          constraints.push(where(column, '==', value));
+          return this; // Return this for chaining
         },
 
-        // For queries without filters
-        then: async (resolve: any, reject?: any) => {
-          const result = await firestoreOperations.getAll(table);
-          this.data = result.data;
-          this.count = result.count;
-          this.error = result.error;
-          return resolve ? resolve(this) : this;
+        order: function(column: string, opts?: { ascending?: boolean }) {
+          const direction = opts?.ascending === false ? 'desc' : 'asc';
+          constraints.push(orderBy(column, direction));
+          return this; // Return this for chaining
+        },
+
+        then: async (resolve: any) => {
+          try {
+            // Validate constraints don't have undefined values
+            const hasUndefined = constraints.some((c: any) => {
+              // Check if constraint has undefined value
+              return c?._queryOptions?.fieldFilters?.some((f: any) => f.value === undefined);
+            });
+
+            if (hasUndefined) {
+              const errorResult = { data: [], count: 0, error: { message: 'Query contains undefined values' } };
+              return resolve ? resolve(errorResult) : errorResult;
+            }
+
+            const result = await db.getAll(table, ...constraints);
+
+            // Handle count-only requests
+            if (options?.count === 'exact' && options?.head === true) {
+              return resolve ? resolve({ count: result.count, error: result.error }) : { count: result.count, error: result.error };
+            }
+
+            const finalResult = { data: result.data, count: result.count, error: result.error };
+            return resolve ? resolve(finalResult) : finalResult;
+          } catch (error: any) {
+            const errorResult = { data: [], count: 0, error: { message: error.message } };
+            return resolve ? resolve(errorResult) : errorResult;
+          }
         },
 
         catch: (reject: any) => {
@@ -205,47 +260,44 @@ export const supabase = {
         }
       };
 
-      // Handle count and head options
-      if (options?.count === 'exact' && options?.head === true) {
-        return {
-          ...queryBuilder,
-          eq: function(column: string, value: any) {
-            return {
-              then: async (resolve: any) => {
-                const result = await firestoreOperations.getAll(table, where(column, '==', value));
-                resolve({ count: result.count, error: result.error });
-              }
-            };
-          },
-          then: async (resolve: any) => {
-            const result = await firestoreOperations.getAll(table);
-            resolve({ count: result.count, error: result.error });
-          }
-        };
-      }
-
       return queryBuilder;
     },
 
-    insert: (data: any) => ({
-      select: () => ({
-        single: async () => {
-          return await firestoreOperations.create(table, data);
+    insert: (data: any) => {
+      // Ensure user_id is set if auth.currentUser exists
+      const dataWithUser = {
+        ...data,
+        user_id: data.user_id || auth.currentUser?.uid
+      };
+
+      return {
+        select: () => ({
+          single: async () => {
+            const result = await db.create(table, dataWithUser);
+            if (result.error) {
+              return { data: null, error: result.error };
+            }
+            // Return data directly for .single()
+            return { data: result.data, error: null };
+          },
+          then: async (resolve: any) => {
+            const result = await db.create(table, dataWithUser);
+            return resolve ? resolve({ data: result.data, error: result.error }) : { data: result.data, error: result.error };
+          }
+        }),
+        then: async (resolve: any) => {
+          const result = await db.create(table, dataWithUser);
+          return resolve ? resolve(result) : result;
         }
-      }),
-      then: async (resolve: any) => {
-        const result = await firestoreOperations.create(table, data);
-        return resolve ? resolve(result) : result;
-      }
-    }),
+      };
+    },
 
     update: (data: any) => ({
       eq: (column: string, value: any) => ({
         then: async (resolve: any) => {
-          // Find the document first
-          const docs = await firestoreOperations.getAll(table, where(column, '==', value));
+          const docs = await db.getAll(table, where(column, '==', value));
           if (docs.data.length > 0) {
-            const result = await firestoreOperations.update(table, docs.data[0].id, data);
+            const result = await db.update(table, docs.data[0].id, data);
             return resolve ? resolve(result) : result;
           }
           return resolve ? resolve({ data: null, error: { message: 'No document found' } }) : { data: null, error: { message: 'No document found' } };
@@ -256,10 +308,9 @@ export const supabase = {
     delete: () => ({
       eq: (column: string, value: any) => ({
         then: async (resolve: any) => {
-          // Find the document first
-          const docs = await firestoreOperations.getAll(table, where(column, '==', value));
+          const docs = await db.getAll(table, where(column, '==', value));
           if (docs.data.length > 0) {
-            const result = await firestoreOperations.delete(table, docs.data[0].id);
+            const result = await db.delete(table, docs.data[0].id);
             return resolve ? resolve(result) : result;
           }
           return resolve ? resolve({ data: null, error: null }) : { data: null, error: null };
@@ -268,19 +319,17 @@ export const supabase = {
     })
   }),
 
-  // Real-time subscriptions (Supabase style)
+  // Real-time subscriptions
   channel: (name: string) => {
-    let unsubscribe: (() => void) | null = null;
+    let unsubscribe: Unsubscribe | null = null;
 
     return {
       on: (event: string, filter: any, callback: () => void) => {
-        // Extract table name from filter
         const tableName = filter.table;
 
         return {
           subscribe: () => {
-            // Subscribe to Firestore real-time updates
-            unsubscribe = firestoreOperations.subscribe(tableName, () => {
+            unsubscribe = db.subscribe(tableName, () => {
               callback();
             });
             return { unsubscribe: () => unsubscribe?.() };
@@ -297,25 +346,26 @@ export const supabase = {
     // Firebase handles cleanup automatically
   },
 
-  // Mock functions (for edge functions)
+  // Cloud Functions
   functions: {
     invoke: async (functionName: string, options?: any) => {
-      console.log(`Firebase: Mock function call to ${functionName}`, options);
+      try {
+        const { getFunctions, httpsCallable } = await import('firebase/functions');
+        const functions = getFunctions(app);
+        const callable = httpsCallable(functions, functionName);
 
-      // Return mock data for now
-      // In production, you'd replace these with Cloud Functions or your own API
-      if (functionName === 'suggest-tickets') {
-        return { data: { suggestions: [] }, error: null };
+        const result = await callable(options || {});
+        return { data: result.data, error: null };
+      } catch (error: any) {
+        console.error(`Error calling function ${functionName}:`, error);
+        return { data: null, error: { message: error.message } };
       }
-
-      if (functionName === 'reddit-sync') {
-        return { data: { synced: 0 }, error: null };
-      }
-
-      return { data: null, error: null };
     }
   }
 };
 
-// Export for direct use
-export { firestoreOperations };
+// Export for backwards compatibility
+export const supabase = firebase;
+
+// Export direct database access
+export { firestore as database };

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +20,7 @@ const Auth = () => {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signUp(email, password);
+      const { error } = await firebase.auth.signUp(email, password);
 
       if (error) throw error;
 
@@ -44,7 +44,7 @@ const Auth = () => {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword(email, password);
+      const { error } = await firebase.auth.signInWithPassword(email, password);
 
       if (error) throw error;
 
