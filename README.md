@@ -1,73 +1,217 @@
-# Welcome to your Lovable project
+# Loopd - Feedback Loop Station
 
-## Project info
+AI-powered feedback aggregation and ticket management system built with React, TypeScript, and Firebase.
 
-**URL**: https://lovable.dev/projects/23711d1a-4961-4316-9c1b-31fe2b5e31d9
+## 🚀 Quick Start
 
-## How can I edit this code?
+**New to this project?** Follow these steps:
 
-There are several ways of editing your application.
+1. **Install dependencies**
+   ```bash
+   npm install
+   ```
 
-**Use Lovable**
+2. **Set up Firebase** (5 minutes)
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/23711d1a-4961-4316-9c1b-31fe2b5e31d9) and start prompting.
+   See **[QUICKSTART.md](./QUICKSTART.md)** for step-by-step instructions
 
-Changes made via Lovable will be committed automatically to this repo.
+   Or read **[FIREBASE_SETUP.md](./FIREBASE_SETUP.md)** for detailed guide
 
-**Use your preferred IDE**
+3. **Configure environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your Firebase credentials
+   ```
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+4. **Start development**
+   ```bash
+   npm run dev
+   ```
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+5. **Open your browser**
 
-Follow these steps:
+   Visit http://localhost:8080
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+## 📋 What's This Project?
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+Loopd helps product teams:
+- 📊 **Aggregate feedback** from multiple sources (Reddit, Discord, manual input)
+- 🤖 **AI-powered analysis** to cluster similar feedback
+- 🎫 **Generate ticket suggestions** automatically
+- 👥 **Identify community champions** based on engagement
+- 📈 **Track metrics** and analytics
 
-# Step 3: Install the necessary dependencies.
-npm i
+## 🛠️ Tech Stack
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+- **Frontend**: React 18 + TypeScript + Vite
+- **Backend**: Firebase (Firestore + Auth)
+- **UI Components**: shadcn-ui (40+ components)
+- **Styling**: Tailwind CSS
+- **State Management**: TanStack React Query
+- **Charts**: Recharts
+- **Animations**: Framer Motion
+
+## 📁 Project Structure
+
+```
+src/
+├── lib/
+│   └── firebase.ts         # Firebase configuration & API
+├── pages/
+│   ├── Auth.tsx           # Login/signup page
+│   ├── Dashboard.tsx      # Main dashboard
+│   ├── Tickets.tsx        # Ticket management
+│   └── Settings.tsx       # Data sources & analytics
+├── components/
+│   ├── Layout.tsx         # App shell with navbar
+│   ├── TicketSuggestions.tsx
+│   ├── CommunityChampions.tsx
+│   ├── DataSourcesManager.tsx
+│   └── ui/                # shadcn-ui components
+└── hooks/
+    └── use-toast.ts       # Toast notifications
 ```
 
-**Edit a file directly in GitHub**
+## 🔥 Firebase Collections
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Your Firestore database will have these collections:
 
-**Use GitHub Codespaces**
+- `tickets` - User-created tickets
+- `ticket_suggestions` - AI-generated suggestions
+- `feedback_sources` - Raw feedback data
+- `user_profiles` - Community member profiles
+- `integration_configs` - Data source settings
+- `clusters` - Grouped feedback themes
+- `events` - Activity logs
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## 📜 Available Scripts
 
-## What technologies are used for this project?
+```bash
+# Development
+npm run dev              # Start dev server (port 8080)
 
-This project is built with:
+# Production
+npm run build            # Build for production
+npm run preview          # Preview production build
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+# Code Quality
+npm run lint             # Run ESLint
+```
 
-## How can I deploy this project?
+## 🔐 Environment Variables
 
-Simply open [Lovable](https://lovable.dev/projects/23711d1a-4961-4316-9c1b-31fe2b5e31d9) and click on Share -> Publish.
+Required variables (get from Firebase Console):
 
-## Can I connect a custom domain to my Lovable project?
+```env
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_STORAGE_BUCKET=
+VITE_FIREBASE_MESSAGING_SENDER_ID=
+VITE_FIREBASE_APP_ID=
+```
 
-Yes, you can!
+## 📖 Documentation
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+- **[QUICKSTART.md](./QUICKSTART.md)** - Get up and running in 5 minutes
+- **[FIREBASE_SETUP.md](./FIREBASE_SETUP.md)** - Complete Firebase setup guide
+- **[claude.md](./claude.md)** - Project architecture & development guide
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## 🌟 Features
+
+### Current Features
+- ✅ Email/password authentication
+- ✅ Ticket creation and management
+- ✅ Manual feedback ingestion
+- ✅ Data source configuration (Reddit subreddits)
+- ✅ Community champions dashboard
+- ✅ Real-time updates (Firestore subscriptions)
+- ✅ Dark/light theme
+- ✅ Responsive design
+
+### Planned Features (Require Backend Functions)
+- 🔄 Automated Reddit syncing
+- 🤖 AI ticket suggestions
+- 🎯 Feedback clustering
+- 📧 Email digests
+- 🔗 GitHub/Discord/Slack integrations
+
+## 🚢 Deployment
+
+### Deploy to Firebase Hosting
+
+```bash
+# Install Firebase CLI
+npm install -g firebase-tools
+
+# Login
+firebase login
+
+# Initialize (choose Hosting)
+firebase init
+
+# Build and deploy
+npm run build
+firebase deploy
+```
+
+Your app will be live at: `https://your-project.firebaseapp.com`
+
+### Deploy to Vercel/Netlify
+
+```bash
+# Build command
+npm run build
+
+# Output directory
+dist
+
+# Environment variables
+Add all VITE_FIREBASE_* variables in your hosting dashboard
+```
+
+## 🤝 Contributing
+
+This project was converted from a Lovable.dev + Supabase stack to Firebase.
+
+Original features included:
+- 12 Deno edge functions for AI processing
+- PostgreSQL database with 10+ tables
+- Reddit API integration
+- OpenAI/Anthropic integration for AI features
+
+Current focus: Clean, maintainable Firebase-based architecture.
+
+## 📝 Migration History
+
+- **v1.0**: Built with Lovable.dev + Supabase
+- **v2.0**: Removed Lovable integrations, replaced with mock data
+- **v3.0**: Integrated Firebase (current version)
+
+## 🐛 Troubleshooting
+
+**Firebase authentication not working?**
+- Check `.env` file exists and has correct values
+- Restart dev server after changing `.env`
+- Verify Email/Password is enabled in Firebase Console
+
+**Data not persisting?**
+- Check Firestore security rules allow authenticated users
+- Verify you're logged in
+- Check browser console for errors
+
+**Build errors?**
+- Clear cache: `rm -rf node_modules package-lock.json && npm install`
+- Check all environment variables are set
+
+## 📄 License
+
+[Add your license here]
+
+## 👨‍💻 Author
+
+Built by [Your Name]
+
+---
+
+**Ready to start?** → See [QUICKSTART.md](./QUICKSTART.md)

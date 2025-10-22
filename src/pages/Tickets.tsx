@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ExternalLink, Trash2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { TicketSuggestions } from "@/components/TicketSuggestions";
 type LinkedFeedback = {

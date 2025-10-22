@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { DataSourcesManager } from "@/components/DataSourcesManager";
 import { TicketSuggestions } from "@/components/TicketSuggestions";
 import { CommunityChampions } from "@/components/CommunityChampions";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { MessageSquare, Ticket, Sparkles, RefreshCw, TrendingUp } from "lucide-react";
 export default function Dashboard() {
