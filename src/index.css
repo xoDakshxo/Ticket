@@ -1,0 +1,152 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Light Mode - Loopstation */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 13%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 13%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 13%;
+
+    --primary: 162 73% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 13%;
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+
+    --accent: 162 73% 95%;
+    --accent-foreground: 162 73% 30%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 162 73% 60%;
+
+    --radius: 1rem;
+    
+    /* Custom Loopstation tokens */
+    --loop-glow: 162 73% 60% / 0.3;
+    --accent-hover: 162 73% 68%;
+    --success: 162 69% 56%;
+    --warning: 14 85% 61%;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    /* Dark Mode - Loopstation calm & warm */
+    --background: 215 28% 7%;        /* #0D1117 */
+    --foreground: 213 22% 92%;       /* #E6EDF3 */
+
+    --card: 215 21% 11%;             /* #161B22 */
+    --card-foreground: 213 22% 92%;
+
+    --popover: 215 21% 11%;
+    --popover-foreground: 213 22% 92%;
+
+    --primary: 162 73% 60%;          /* #4ECCA3 - mint green stays! */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 215 19% 16%;        /* #1E242C */
+    --secondary-foreground: 213 22% 92%;
+
+    --muted: 215 19% 16%;
+    --muted-foreground: 215 13% 65%; /* #9BA6B1 */
+
+    --accent: 215 19% 16%;           /* Loop message bubble bg */
+    --accent-foreground: 162 73% 60%;
+
+    --destructive: 9 74% 61%;        /* #E76F51 */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 19% 18%;           /* #21262D */
+    --input: 215 19% 18%;
+    --ring: 162 73% 60%;
+    
+    /* Custom dark mode tokens */
+    --loop-glow: 162 73% 60% / 0.3;
+    --accent-hover: 162 73% 68%;     /* #64E0B8 */
+    --success: 162 65% 58%;          /* #3FCF8E */
+    --warning: 14 85% 61%;           /* #E76F51 */
+    --link: 217 91% 67%;             /* #58A6FF */
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  
+  /* Smooth theme transitions */
+  :root, .dark {
+    transition: background-color 0.3s ease-in-out, color 0.3s ease-in-out;
+  }
+  
+  * {
+    transition: background-color 0.25s ease-in-out, border-color 0.25s ease-in-out, color 0.25s ease-in-out;
+  }
+}
+
+@layer utilities {
+  .hover-glow {
+    @apply transition-all duration-200 hover:shadow-lg hover:shadow-primary/20 hover:-translate-y-0.5;
+  }
+  
+  .loop-breathing {
+    animation: breathing 2s ease-in-out infinite;
+  }
+  
+  @keyframes breathing {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  
+  .loop-radial-glow {
+    background: radial-gradient(circle at center, hsl(var(--loop-glow)) 0%, transparent 70%);
+  }
+  
+  .hover-elevate {
+    @apply transition-all duration-200 hover:shadow-md hover:-translate-y-0.5;
+  }
+}

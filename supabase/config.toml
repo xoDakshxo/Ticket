@@ -1,0 +1,37 @@
+project_id = "nabzwdgwzjrfkfbfttaz"
+
+[functions.ingest-feedback]
+verify_jwt = false
+
+[functions.cluster-feedback]
+verify_jwt = false
+
+[functions.reddit-sync]
+verify_jwt = false
+
+[functions.slack-action]
+verify_jwt = false
+
+[functions.weekly-digest]
+verify_jwt = false
+
+[functions.loop-messages]
+verify_jwt = false
+
+[functions.github-sync]
+verify_jwt = true
+
+[functions.discord-webhook]
+verify_jwt = false
+
+[functions.suggest-tickets]
+verify_jwt = true
+
+[functions.collect-engagement-snapshots]
+verify_jwt = false
+
+[functions.analyze-user-intelligence]
+verify_jwt = true
+
+[functions.backfill-user-profiles]
+verify_jwt = true
