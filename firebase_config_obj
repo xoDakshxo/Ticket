@@ -1,0 +1,50 @@
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyC51MPi0v9qutYUdbvUfE7VY0nZuIAgZEM",
+  authDomain: "ticket-b21e9.firebaseapp.com",
+  projectId: "ticket-b21e9",
+  storageBucket: "ticket-b21e9.firebasestorage.app",
+  messagingSenderId: "489988648013",
+  appId: "1:489988648013:web:2b89c278558f806ca40004",
+  measurementId: "G-SVVZXXGELL"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+
+
+
+
+
+
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyC51MPi0v9qutYUdbvUfE7VY0nZuIAgZEM",
+    authDomain: "ticket-b21e9.firebaseapp.com",
+    projectId: "ticket-b21e9",
+    storageBucket: "ticket-b21e9.firebasestorage.app",
+    messagingSenderId: "489988648013",
+    appId: "1:489988648013:web:2b89c278558f806ca40004",
+    measurementId: "G-SVVZXXGELL"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+</script>
