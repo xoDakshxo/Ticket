@@ -7,6 +7,13 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { RedditPost, SummarizedPost } from './types';
 import * as functions from 'firebase-functions/v1';
 
+interface GeminiSummaryItem {
+  post_id: string;
+  summary?: string;
+  key_points?: string[];
+  sentiment?: string;
+}
+
 // Initialize Gemini
 let genAI: GoogleGenerativeAI;
 
@@ -181,17 +188,18 @@ Return ONLY valid JSON array, no markdown.`;
       const text = result.response.text();
       const cleanText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-      const parsed = JSON.parse(cleanText);
+      const parsed = JSON.parse(cleanText) as unknown;
 
       if (Array.isArray(parsed)) {
-        parsed.forEach((item: any) => {
+        (parsed as GeminiSummaryItem[]).forEach((item) => {
           const post = batch.find(p => p.id === item.post_id);
           if (post) {
+            const sentiment = (item.sentiment ?? 'neutral') as SummarizedPost['sentiment'];
             summaries.set(post.id, {
               original_title: post.title,
               summary: item.summary || post.title,
               key_points: item.key_points || [],
-              sentiment: item.sentiment || 'neutral'
+              sentiment
             });
           }
         });

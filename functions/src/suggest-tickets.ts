@@ -7,6 +7,15 @@ import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+interface GeneratedSuggestion {
+  title: string;
+  description: string;
+  priority?: 'low' | 'medium' | 'high';
+  impact_score?: number;
+  is_trending?: boolean;
+  reasoning?: string;
+}
+
 const db = admin.firestore();
 
 // Initialize Gemini
@@ -104,12 +113,10 @@ Return ONLY valid JSON array, no markdown:
 
     // Parse response
     const cleanText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    let suggestions = JSON.parse(cleanText);
-
-    // Validate and ensure it's an array
-    if (!Array.isArray(suggestions)) {
-      suggestions = [suggestions];
-    }
+    const parsed = JSON.parse(cleanText) as unknown;
+    const suggestions: GeneratedSuggestion[] = Array.isArray(parsed)
+      ? (parsed as GeneratedSuggestion[])
+      : [parsed as GeneratedSuggestion];
 
     // Store suggestions in Firestore
     const batch = db.batch();
@@ -140,7 +147,7 @@ Return ONLY valid JSON array, no markdown:
     console.log(`✅ Created ${createdCount} ticket suggestions`);
 
     return {
-      suggestions: suggestions.map((s: any) => ({
+      suggestions: suggestions.map((s) => ({
         title: s.title,
         priority: s.priority,
         impact_score: s.impact_score
@@ -149,11 +156,11 @@ Return ONLY valid JSON array, no markdown:
       message: `Generated ${createdCount} ticket suggestions from ${feedbackItems.length} feedback items`
     };
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error generating ticket suggestions:', error);
     throw new functions.https.HttpsError(
       'internal',
-      `Failed to generate suggestions: ${error.message}`
+      `Failed to generate suggestions: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
 });

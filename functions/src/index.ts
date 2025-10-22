@@ -203,7 +203,7 @@ export const redditSync = functions
         }
       };
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Reddit sync error:', error);
 
       // Rethrow HttpsError as-is
@@ -211,10 +211,12 @@ export const redditSync = functions
         throw error;
       }
 
+      const message = error instanceof Error ? error.message : 'Unknown error';
+
       // Wrap other errors
       throw new functions.https.HttpsError(
         'internal',
-        `Failed to sync Reddit data: ${error.message || 'Unknown error'}`
+        `Failed to sync Reddit data: ${message}`
       );
     }
   });
