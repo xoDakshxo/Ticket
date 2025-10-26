@@ -25,6 +25,7 @@ const db = admin.firestore();
  * Fetches posts from Reddit, summarizes them with Gemini, and stores in Firestore
  */
 export const redditSync = functions
+  .region('asia-south1')
   .runWith({
     timeoutSeconds: 540, // 9 minutes max
     memory: '1GB'
@@ -216,13 +217,15 @@ export const redditSync = functions
 /**
  * Health check function for testing
  */
-export const healthCheck = functions.https.onRequest((req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    functions: ['redditSync', 'suggestTickets']
+export const healthCheck = functions
+  .region('asia-south1')
+  .https.onRequest((req, res) => {
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      functions: ['redditSync', 'suggestTickets']
+    });
   });
-});
 
 // Export suggest-tickets function
 export { suggestTickets } from './suggest-tickets';
