@@ -1,6 +1,6 @@
 // Firebase configuration and initialization
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
 import {
   getFirestore,
   collection,
@@ -13,14 +13,14 @@ import {
   query,
   where,
   orderBy,
+  limit as limitConstraint,
   onSnapshot,
-  Timestamp,
+  serverTimestamp,
   QueryConstraint,
-  serverTimestamp
+  Unsubscribe,
 } from 'firebase/firestore';
 
-// Firebase configuration
-// These values come from your Firebase Console
+// Firebase configuration from environment variables
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -33,254 +33,483 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const firestore = getFirestore(app);
 
-// Auth API
+// Type definitions for better TypeScript support
+interface FirebaseResponse<T> {
+  data: T | null;
+  error: { message: string } | null;
+}
+
+interface FirebaseQueryResponse<T> {
+  data: T[];
+  count: number;
+  error: { message: string } | null;
+}
+
+type FirestoreRecord = Record<string, unknown> & { id: string };
+
+interface SupabaseSelectOptions {
+  count?: 'exact';
+  head?: boolean;
+}
+
+type FilterFunction<T> = (row: T) => boolean;
+
+const toErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return 'Unknown error';
+};
+
+// Authentication API
 export const firebaseAuth = {
-  signUp: async (email: string, password: string) => {
+  signUp: async (email: string, password: string): Promise<FirebaseResponse<{ user: User }>> => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       return { data: { user: userCredential.user }, error: null };
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
+    } catch (error: unknown) {
+      return { data: null, error: { message: toErrorMessage(error) } };
     }
   },
 
-  signInWithPassword: async (email: string, password: string) => {
+  signInWithPassword: async (email: string, password: string): Promise<FirebaseResponse<{ user: User }>> => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       return { data: { user: userCredential.user }, error: null };
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
+    } catch (error: unknown) {
+      return { data: null, error: { message: toErrorMessage(error) } };
     }
   },
 
-  signOut: async () => {
+  signOut: async (): Promise<FirebaseResponse<null>> => {
     try {
-      await signOut(auth);
-      return { error: null };
-    } catch (error: any) {
-      return { error: { message: error.message } };
+      await firebaseSignOut(auth);
+      return { data: null, error: null };
+    } catch (error: unknown) {
+      return { data: null, error: { message: toErrorMessage(error) } };
     }
   },
 
   getUser: () => {
-    return { data: { user: auth.currentUser }, error: null };
+    const user = auth.currentUser;
+    // Map uid to id for Supabase compatibility
+    if (user) {
+      return {
+        data: {
+          user: {
+            ...user,
+            id: user.uid // Add id property for compatibility
+          }
+        },
+        error: null
+      };
+    }
+    return { data: { user: null }, error: null };
   },
 
-  onAuthStateChange: (callback: (user: any) => void) => {
+  onAuthStateChange: (callback: (user: User | null) => void): Unsubscribe => {
     return onAuthStateChanged(auth, callback);
-  }
+  },
+
+  // Get current user synchronously
+  getCurrentUser: () => auth.currentUser,
 };
 
-// Generic Firestore operations
-const firestoreOperations = {
+// Firestore Database Operations
+export const db = {
+  // Collections helper
+  collection: (name: string) => collection(firestore, name),
+
   // Get all documents from a collection
-  getAll: async (collectionName: string, ...constraints: QueryConstraint[]) => {
+  getAll: async <T extends FirestoreRecord = FirestoreRecord>(collectionName: string, ...constraints: QueryConstraint[]): Promise<FirebaseQueryResponse<T>> => {
     try {
       const q = constraints.length > 0
-        ? query(collection(db, collectionName), ...constraints)
-        : query(collection(db, collectionName));
+        ? query(collection(firestore, collectionName), ...constraints)
+        : collection(firestore, collectionName);
 
       const snapshot = await getDocs(q);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snapshot.docs.map((document) => {
+        const payload = document.data() as Record<string, unknown>;
+        return { id: document.id, ...payload } as T;
+      });
       return { data, count: data.length, error: null };
-    } catch (error: any) {
-      return { data: [], count: 0, error: { message: error.message } };
+    } catch (error: unknown) {
+      console.error(`Error getting documents from ${collectionName}:`, error);
+      return { data: [], count: 0, error: { message: toErrorMessage(error) } };
     }
   },
 
   // Get a single document
-  getOne: async (collectionName: string, docId: string) => {
+  getOne: async <T extends FirestoreRecord = FirestoreRecord>(collectionName: string, docId: string): Promise<FirebaseResponse<T>> => {
     try {
-      const docRef = doc(db, collectionName, docId);
+      const docRef = doc(firestore, collectionName, docId);
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
-        return { data: { id: docSnap.id, ...docSnap.data() }, error: null };
+        const payload = docSnap.data() as Record<string, unknown>;
+        return { data: { id: docSnap.id, ...payload } as T, error: null };
       } else {
         return { data: null, error: { message: 'Document not found' } };
       }
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
+    } catch (error: unknown) {
+      console.error(`Error getting document ${docId} from ${collectionName}:`, error);
+      return { data: null, error: { message: toErrorMessage(error) } };
     }
   },
 
   // Create a new document
-  create: async (collectionName: string, data: any) => {
+  create: async <T extends FirestoreRecord = FirestoreRecord>(collectionName: string, data: Record<string, unknown>): Promise<FirebaseResponse<T>> => {
     try {
-      const docRef = await addDoc(collection(db, collectionName), {
+      const docRef = await addDoc(collection(firestore, collectionName), {
         ...data,
         created_at: serverTimestamp(),
         updated_at: serverTimestamp(),
       });
       const newDoc = await getDoc(docRef);
-      return { data: { id: newDoc.id, ...newDoc.data() }, error: null };
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
+      const payload = newDoc.data() as Record<string, unknown> | undefined;
+      return { data: payload ? ({ id: newDoc.id, ...payload } as T) : null, error: null };
+    } catch (error: unknown) {
+      console.error(`Error creating document in ${collectionName}:`, error);
+      return { data: null, error: { message: toErrorMessage(error) } };
     }
   },
 
   // Update a document
-  update: async (collectionName: string, docId: string, data: any) => {
+  update: async <T extends FirestoreRecord = FirestoreRecord>(collectionName: string, docId: string, data: Record<string, unknown>): Promise<FirebaseResponse<T>> => {
     try {
-      const docRef = doc(db, collectionName, docId);
+      const docRef = doc(firestore, collectionName, docId);
       await updateDoc(docRef, {
         ...data,
         updated_at: serverTimestamp(),
       });
       const updatedDoc = await getDoc(docRef);
-      return { data: { id: updatedDoc.id, ...updatedDoc.data() }, error: null };
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
+      const payload = updatedDoc.data() as Record<string, unknown> | undefined;
+      return { data: payload ? ({ id: updatedDoc.id, ...payload } as T) : null, error: null };
+    } catch (error: unknown) {
+      console.error(`Error updating document ${docId} in ${collectionName}:`, error);
+      return { data: null, error: { message: toErrorMessage(error) } };
     }
   },
 
   // Delete a document
-  delete: async (collectionName: string, docId: string) => {
+  delete: async (collectionName: string, docId: string): Promise<FirebaseResponse<null>> => {
     try {
-      await deleteDoc(doc(db, collectionName, docId));
+      await deleteDoc(doc(firestore, collectionName, docId));
       return { data: null, error: null };
-    } catch (error: any) {
-      return { data: null, error: { message: error.message } };
+    } catch (error: unknown) {
+      console.error(`Error deleting document ${docId} from ${collectionName}:`, error);
+      return { data: null, error: { message: toErrorMessage(error) } };
     }
   },
 
   // Subscribe to real-time updates
-  subscribe: (collectionName: string, callback: (data: any[]) => void, ...constraints: QueryConstraint[]) => {
+  subscribe: <T extends FirestoreRecord = FirestoreRecord>(
+    collectionName: string,
+    callback: (data: T[]) => void,
+    ...constraints: QueryConstraint[]
+  ): Unsubscribe => {
     const q = constraints.length > 0
-      ? query(collection(db, collectionName), ...constraints)
-      : query(collection(db, collectionName));
+      ? query(collection(firestore, collectionName), ...constraints)
+      : collection(firestore, collectionName);
 
     return onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const data = snapshot.docs.map((document) => {
+        const payload = document.data() as Record<string, unknown>;
+        return { id: document.id, ...payload } as T;
+      });
       callback(data);
+    }, (error) => {
+      console.error(`Error in realtime subscription for ${collectionName}:`, error);
     });
-  }
+  },
+
+  // Query helpers
+  where,
+  orderBy,
 };
 
-// Supabase-compatible API wrapper
-// This mimics the Supabase API structure for easier migration
-export const supabase = {
+// Main Firebase API (compatible interface for migration from Supabase)
+export const firebase = {
   auth: firebaseAuth,
 
-  from: (table: string) => ({
-    select: (columns: string = '*', options?: any) => {
-      const queryBuilder = {
-        data: [] as any[],
-        count: 0,
-        error: null as any,
+  from: <TRecord extends FirestoreRecord = FirestoreRecord>(table: string) => ({
+    select: (_columns: string = '*', options?: SupabaseSelectOptions) => {
+      const queryConstraints: QueryConstraint[] = [];
+      const manualFilters: FilterFunction<TRecord>[] = [];
+      let idFilter: string | null = null;
+      let hasUndefinedFilter = false;
+      let limitValue: number | null = null;
 
-        eq: function(column: string, value: any) {
-          // Execute the query with filter
-          const execute = async () => {
-            const result = await firestoreOperations.getAll(
-              table,
-              where(column, '==', value)
-            );
-            this.data = result.data;
-            this.count = result.count;
-            this.error = result.error;
-            return this;
-          };
+      const applyManualFilters = (rows: TRecord[]): TRecord[] => {
+        if (!rows?.length || manualFilters.length === 0) return rows;
+        return manualFilters.reduce<TRecord[]>((acc, filter) => acc.filter(filter), rows);
+      };
 
-          // Return promise-like object
-          return {
-            ...this,
-            then: (resolve: any, reject?: any) => execute().then(resolve, reject),
-            catch: (reject: any) => execute().catch(reject),
-          };
-        },
+      const runQuery = async () => {
+        try {
+          if (hasUndefinedFilter) {
+            return { data: [] as TRecord[], count: 0, error: { message: 'Query contains undefined values' } };
+          }
 
-        // For queries without filters
-        then: async (resolve: any, reject?: any) => {
-          const result = await firestoreOperations.getAll(table);
-          this.data = result.data;
-          this.count = result.count;
-          this.error = result.error;
-          return resolve ? resolve(this) : this;
-        },
+          if (idFilter) {
+            const result = await db.getOne<TRecord>(table, idFilter);
+            const rows = result.data ? [result.data] : [];
+            const filtered = applyManualFilters(rows);
 
-        catch: (reject: any) => {
-          return Promise.reject(reject);
+            if (options?.count === 'exact' && options?.head) {
+              return { data: [] as TRecord[], count: filtered.length, error: result.error };
+            }
+
+            return { data: filtered, count: filtered.length, error: result.error };
+          }
+
+          const constraintsToUse = limitValue !== null
+            ? [...queryConstraints, limitConstraint(limitValue)]
+            : queryConstraints;
+
+          const result = await db.getAll<TRecord>(table, ...constraintsToUse);
+          const filtered = applyManualFilters(result.data);
+
+          if (options?.count === 'exact' && options?.head) {
+            return { data: [] as TRecord[], count: filtered.length, error: result.error };
+          }
+
+          return { data: filtered, count: filtered.length, error: result.error };
+        } catch (error: unknown) {
+          return { data: [] as TRecord[], count: 0, error: { message: toErrorMessage(error) } };
         }
       };
 
-      // Handle count and head options
-      if (options?.count === 'exact' && options?.head === true) {
-        return {
-          ...queryBuilder,
-          eq: function(column: string, value: any) {
-            return {
-              then: async (resolve: any) => {
-                const result = await firestoreOperations.getAll(table, where(column, '==', value));
-                resolve({ count: result.count, error: result.error });
-              }
-            };
-          },
-          then: async (resolve: any) => {
-            const result = await firestoreOperations.getAll(table);
-            resolve({ count: result.count, error: result.error });
+      const builder = {
+        eq: (column: string, value: unknown) => {
+          if (value === undefined) {
+            hasUndefinedFilter = true;
+            return builder;
           }
-        };
-      }
 
-      return queryBuilder;
+          if (column === 'id') {
+            idFilter = typeof value === 'string' ? value : String(value);
+          } else {
+            queryConstraints.push(where(column, '==', value));
+          }
+          return builder;
+        },
+
+        neq: (column: string, value: unknown) => {
+          manualFilters.push((row) => {
+            if (!row) return false;
+            const target = column === 'id' ? row.id : (row as Record<string, unknown>)[column];
+            return target !== value;
+          });
+          return builder;
+        },
+
+        order: (column: string, opts?: { ascending?: boolean }) => {
+          const direction = opts?.ascending === false ? 'desc' : 'asc';
+          queryConstraints.push(orderBy(column, direction));
+          return builder;
+        },
+
+        limit: (value: number) => {
+          if (Number.isFinite(value) && value > 0) {
+            limitValue = Math.floor(value);
+          }
+          return builder;
+        },
+
+        then: async <TReturn = { data: TRecord[]; count: number; error: { message: string } | null }>(resolve?: (value: { data: TRecord[]; count: number; error: { message: string } | null }) => TReturn | Promise<TReturn>) => {
+          const result = await runQuery();
+          if (resolve) {
+            return resolve(result);
+          }
+          return result as TReturn;
+        },
+
+        catch: <TReturn = never>(reject?: (reason: unknown) => TReturn | Promise<TReturn>) => {
+          return runQuery().then((value) => value, (error) => {
+            if (reject) {
+              return reject(error);
+            }
+            throw error;
+          });
+        },
+
+        single: async () => {
+          const result = await runQuery();
+          if (result.error) {
+            return { data: null, error: result.error };
+          }
+          return { data: result.data[0] ?? null, error: null };
+        }
+      };
+
+      return builder;
     },
 
-    insert: (data: any) => ({
-      select: () => ({
-        single: async () => {
-          return await firestoreOperations.create(table, data);
+    insert: (payload: Record<string, unknown> | Array<Record<string, unknown>>) => {
+      const isArrayInput = Array.isArray(payload);
+      const inputArray = (isArrayInput ? payload : [payload]).map((item) => {
+        const record: Record<string, unknown> = { ...item };
+        if (record.user_id === undefined) {
+          record.user_id = auth.currentUser?.uid ?? null;
         }
-      }),
-      then: async (resolve: any) => {
-        const result = await firestoreOperations.create(table, data);
-        return resolve ? resolve(result) : result;
-      }
-    }),
+        return record;
+      });
 
-    update: (data: any) => ({
-      eq: (column: string, value: any) => ({
-        then: async (resolve: any) => {
-          // Find the document first
-          const docs = await firestoreOperations.getAll(table, where(column, '==', value));
-          if (docs.data.length > 0) {
-            const result = await firestoreOperations.update(table, docs.data[0].id, data);
-            return resolve ? resolve(result) : result;
+      type InsertResult = { data: TRecord | TRecord[] | null; error: { message: string } | null };
+      let insertPromise: Promise<InsertResult> | null = null;
+
+      const runInsert = async (): Promise<InsertResult> => {
+        const created: TRecord[] = [];
+        for (const record of inputArray) {
+          const result = await db.create<TRecord>(table, record);
+          if (result.error || !result.data) {
+            return {
+              data: isArrayInput ? created : null,
+              error: result.error ?? { message: 'Failed to create document' }
+            };
           }
-          return resolve ? resolve({ data: null, error: { message: 'No document found' } }) : { data: null, error: { message: 'No document found' } };
+          created.push(result.data);
+        }
+
+        return {
+          data: isArrayInput ? created : created[0] ?? null,
+          error: null
+        };
+      };
+
+      const ensureInsert = () => {
+        if (!insertPromise) {
+          insertPromise = runInsert();
+        }
+        return insertPromise;
+      };
+
+      return {
+        select: () => ({
+          single: async () => {
+            const result = await ensureInsert();
+            if (result.error) {
+              return { data: null, error: result.error };
+            }
+            const first = Array.isArray(result.data) ? result.data[0] ?? null : result.data;
+            return { data: first ?? null, error: null };
+          },
+          then: async <TReturn = InsertResult>(resolve?: (value: InsertResult) => TReturn | Promise<TReturn>) => {
+            const result = await ensureInsert();
+            return resolve ? resolve(result) : (result as unknown as TReturn);
+          }
+        }),
+        then: async <TReturn = InsertResult>(resolve?: (value: InsertResult) => TReturn | Promise<TReturn>) => {
+          const result = await ensureInsert();
+          return resolve ? resolve(result) : (result as unknown as TReturn);
+        }
+      };
+    },
+
+    update: (data: Record<string, unknown>) => ({
+      eq: (column: string, value: unknown) => ({
+        then: async <TReturn = FirebaseResponse<TRecord>>(resolve?: (value: FirebaseResponse<TRecord>) => TReturn | Promise<TReturn>) => {
+          if (value === undefined) {
+            const errorResult = { data: null, error: { message: 'No document found' } };
+            return resolve ? resolve(errorResult) : (errorResult as unknown as TReturn);
+          }
+
+          if (column === 'id') {
+            const result = await db.update<TRecord>(table, String(value), data);
+            return resolve ? resolve(result) : (result as unknown as TReturn);
+          }
+
+          const docs = await db.getAll<TRecord>(table, where(column, '==', value));
+          if (docs.error) {
+            const errorResult = { data: null, error: docs.error };
+            return resolve ? resolve(errorResult) : (errorResult as unknown as TReturn);
+          }
+
+          if (docs.data.length > 0) {
+            const result = await db.update<TRecord>(table, docs.data[0].id, data);
+            return resolve ? resolve(result) : (result as unknown as TReturn);
+          }
+
+          const errorResult = { data: null, error: { message: 'No document found' } };
+          return resolve ? resolve(errorResult) : (errorResult as unknown as TReturn);
         }
       })
     }),
 
     delete: () => ({
-      eq: (column: string, value: any) => ({
-        then: async (resolve: any) => {
-          // Find the document first
-          const docs = await firestoreOperations.getAll(table, where(column, '==', value));
-          if (docs.data.length > 0) {
-            const result = await firestoreOperations.delete(table, docs.data[0].id);
-            return resolve ? resolve(result) : result;
+      eq: (column: string, value: unknown) => ({
+        then: async <TReturn = FirebaseResponse<null>>(resolve?: (value: FirebaseResponse<null>) => TReturn | Promise<TReturn>) => {
+          if (value === undefined) {
+            const errorResult = { data: null, error: { message: 'Invalid delete filter' } };
+            return resolve ? resolve(errorResult) : (errorResult as unknown as TReturn);
           }
-          return resolve ? resolve({ data: null, error: null }) : { data: null, error: null };
+
+          if (column === 'id') {
+            const result = await db.delete(table, String(value));
+            return resolve ? resolve(result) : (result as unknown as TReturn);
+          }
+
+          const docs = await db.getAll<TRecord>(table, where(column, '==', value));
+          if (docs.error) {
+            const errorResult = { data: null, error: docs.error };
+            return resolve ? resolve(errorResult) : (errorResult as unknown as TReturn);
+          }
+
+          if (docs.data.length > 0) {
+            const result = await db.delete(table, docs.data[0].id);
+            return resolve ? resolve(result) : (result as unknown as TReturn);
+          }
+
+          const okResult = { data: null, error: null };
+          return resolve ? resolve(okResult) : (okResult as unknown as TReturn);
+        }
+      }),
+      neq: (column: string, value: unknown) => ({
+        then: async <TReturn = FirebaseResponse<null>>(resolve?: (value: FirebaseResponse<null>) => TReturn | Promise<TReturn>) => {
+          const docs = await db.getAll<TRecord>(table);
+          if (docs.error) {
+            const errorResult = { data: null, error: docs.error };
+            return resolve ? resolve(errorResult) : (errorResult as unknown as TReturn);
+          }
+
+          const targets = docs.data.filter((row) => {
+            const rowRecord = row as Record<string, unknown>;
+            const targetValue = column === 'id' ? row.id : rowRecord[column];
+            return targetValue !== value;
+          });
+
+          let lastError: { message: string } | null = null;
+          for (const row of targets) {
+            const result = await db.delete(table, row.id);
+            if (result.error) {
+              lastError = result.error;
+              break;
+            }
+          }
+
+          const response = { data: null, error: lastError };
+          return resolve ? resolve(response) : (response as unknown as TReturn);
         }
       })
     })
   }),
 
-  // Real-time subscriptions (Supabase style)
+  // Real-time subscriptions
   channel: (name: string) => {
-    let unsubscribe: (() => void) | null = null;
+    let unsubscribe: Unsubscribe | null = null;
 
     return {
-      on: (event: string, filter: any, callback: () => void) => {
-        // Extract table name from filter
+      on: (_event: string, filter: { table: string }, callback: () => void) => {
         const tableName = filter.table;
 
         return {
           subscribe: () => {
-            // Subscribe to Firestore real-time updates
-            unsubscribe = firestoreOperations.subscribe(tableName, () => {
+            unsubscribe = db.subscribe(tableName, () => {
               callback();
             });
             return { unsubscribe: () => unsubscribe?.() };
@@ -293,29 +522,30 @@ export const supabase = {
     };
   },
 
-  removeChannel: (channel: any) => {
+  removeChannel: (_channel: unknown) => {
     // Firebase handles cleanup automatically
   },
 
-  // Mock functions (for edge functions)
+  // Cloud Functions
   functions: {
-    invoke: async (functionName: string, options?: any) => {
-      console.log(`Firebase: Mock function call to ${functionName}`, options);
+    invoke: async (functionName: string, options?: Record<string, unknown>) => {
+      try {
+        const { getFunctions, httpsCallable } = await import('firebase/functions');
+        const functions = getFunctions(app);
+        const callable = httpsCallable(functions, functionName);
 
-      // Return mock data for now
-      // In production, you'd replace these with Cloud Functions or your own API
-      if (functionName === 'suggest-tickets') {
-        return { data: { suggestions: [] }, error: null };
+        const result = await callable(options ?? {});
+        return { data: result.data, error: null };
+      } catch (error: unknown) {
+        console.error(`Error calling function ${functionName}:`, error);
+        return { data: null, error: { message: toErrorMessage(error) } };
       }
-
-      if (functionName === 'reddit-sync') {
-        return { data: { synced: 0 }, error: null };
-      }
-
-      return { data: null, error: null };
     }
   }
 };
 
-// Export for direct use
-export { firestoreOperations };
+// Export for backwards compatibility
+export const supabase = firebase;
+
+// Export direct database access
+export { firestore as database };

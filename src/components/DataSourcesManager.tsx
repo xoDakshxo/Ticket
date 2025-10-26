@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Plus, Trash2, Loader2, AlertTriangle, CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,9 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 interface DataSource {
   id: string;
@@ -38,33 +38,12 @@ export const DataSourcesManager = () => {
   });
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchSources();
-
-    // Real-time subscription to feedback sources
-    const channel = supabase
-      .channel('feedback-sources-changes')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'feedback_sources'
-      }, (payload) => {
-        console.log('Feedback source changed:', payload);
-        // Could update counts or stats here if needed
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  const fetchSources = async () => {
+  const fetchSources = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await firebase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
+      const { data, error } = await firebase
         .from('integration_configs')
         .select('*')
         .eq('user_id', user.id)
@@ -73,16 +52,36 @@ export const DataSourcesManager = () => {
 
       if (error) throw error;
       setSources((data || []) as unknown as DataSource[]);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    fetchSources();
+
+    // Real-time subscription to feedback sources
+    const channel = firebase
+      .channel('feedback-sources-changes')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'feedback_sources'
+      }, () => {
+        fetchSources();
+      })
+      .subscribe();
+
+    return () => {
+      firebase.removeChannel(channel);
+    };
+  }, [fetchSources]);
 
   const addSource = async () => {
     if (!newSubreddit.trim()) {
@@ -96,7 +95,7 @@ export const DataSourcesManager = () => {
 
     setAdding(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await firebase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
       // Clean up subreddit name (remove r/ prefix if present)
@@ -115,7 +114,7 @@ export const DataSourcesManager = () => {
         return;
       }
 
-      const { data: insertData, error } = await supabase
+      const { data: insertData, error } = await firebase
         .from('integration_configs')
         .insert({
           user_id: user.id,
@@ -154,7 +153,7 @@ export const DataSourcesManager = () => {
       }, 1500);
 
       // Start background sync
-      supabase.functions.invoke('reddit-sync', {
+      firebase.functions.invoke('redditSync', {
         body: { 
           subreddit: cleanSubreddit,
           user_id: user.id,
@@ -194,7 +193,7 @@ export const DataSourcesManager = () => {
                 description: "Generating ticket suggestions from new data",
               });
 
-              supabase.functions.invoke('suggest-tickets').then(({ data: suggestData, error: suggestError }) => {
+              firebase.functions.invoke('suggestTickets').then(({ data: suggestData, error: suggestError }) => {
                 if (suggestError) {
                   console.error('Auto-suggest error:', suggestError);
                 } else if (suggestData?.suggestions) {
@@ -211,10 +210,10 @@ export const DataSourcesManager = () => {
 
       setNewSubreddit("");
       fetchSources();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -225,7 +224,7 @@ export const DataSourcesManager = () => {
   const removeSource = async (id: string, subreddit: string) => {
     setRemovingId(id);
     try {
-      const { error } = await supabase
+      const { error } = await firebase
         .from('integration_configs')
         .delete()
         .eq('id', id);
@@ -238,10 +237,10 @@ export const DataSourcesManager = () => {
       });
 
       fetchSources();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -256,7 +255,7 @@ export const DataSourcesManager = () => {
 
     setClearingFeedback(true);
     try {
-      const { error } = await supabase
+      const { error } = await firebase
         .from('feedback_sources')
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all rows
@@ -267,10 +266,10 @@ export const DataSourcesManager = () => {
         title: "Feedback Cleared",
         description: "All feedback data has been removed",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {

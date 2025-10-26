@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { Sparkles, ExternalLink, ThumbsUp, ThumbsDown, RefreshCw, Filter, TrendingUp, Zap } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,26 +15,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-interface TicketSuggestion {
-  id: string;
-  title: string;
-  description: string;
-  priority: 'low' | 'medium' | 'high';
-  impact_score: number;
-  theme: string;
+import { getErrorMessage } from "@/lib/utils";
+import type { TicketSuggestion as TicketSuggestionRecord, Ticket, TicketFeedbackLink } from "@/types/firestore";
+
+type TicketSuggestion = TicketSuggestionRecord & {
   status: string;
-  source_refs: any;
-  velocity_score?: number;
-  is_trending?: boolean;
-  declined_reason?: string;
-  sources?: Array<{
-    id: string;
-    external_id: string;
-    author: string;
-    content: string;
-    url: string;
-  }>;
-}
+};
 interface TicketSuggestionsProps {
   onTicketCreated?: () => void;
 }
@@ -54,11 +40,32 @@ export function TicketSuggestions({
   const {
     toast
   } = useToast();
+  const fetchExistingSuggestions = useCallback(async () => {
+    try {
+      const { data, error } = await firebase
+        .from<TicketSuggestion>('ticket_suggestions')
+        .select('*')
+        .eq('status', 'pending')
+        .order('impact_score', {
+          ascending: false
+        });
+      if (error) throw error;
+
+      console.log('Fetched suggestions:', data);
+      console.log('Trending suggestions:', data?.filter(s => s.is_trending));
+      
+      setSuggestions((data || []) as TicketSuggestion[]);
+    } catch (error: unknown) {
+      console.error('Error fetching suggestions:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
   useEffect(() => {
     fetchExistingSuggestions();
 
     // Real-time subscription
-    const channel = supabase.channel('ticket-suggestions-changes').on('postgres_changes', {
+    const channel = firebase.channel('ticket-suggestions-changes').on('postgres_changes', {
       event: '*',
       schema: 'public',
       table: 'ticket_suggestions'
@@ -66,36 +73,16 @@ export function TicketSuggestions({
       fetchExistingSuggestions();
     }).subscribe();
     return () => {
-      supabase.removeChannel(channel);
+      firebase.removeChannel(channel);
     };
-  }, []);
-  const fetchExistingSuggestions = async () => {
-    try {
-      const {
-        data,
-        error
-      } = await supabase.from('ticket_suggestions').select('*').eq('status', 'pending').order('impact_score', {
-        ascending: false
-      });
-      if (error) throw error;
-      
-      console.log('Fetched suggestions:', data);
-      console.log('Trending suggestions:', data?.filter(s => s.is_trending));
-      
-      setSuggestions((data || []) as TicketSuggestion[]);
-    } catch (error: any) {
-      console.error('Error fetching suggestions:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [fetchExistingSuggestions]);
   const fetchSuggestions = async () => {
     try {
       setGenerating(true);
       const {
         data,
         error
-      } = await supabase.functions.invoke('suggest-tickets');
+      } = await firebase.functions.invoke('suggestTickets');
       if (error) throw error;
       if (data?.suggestions) {
         // Refresh from database to get the newly created suggestions
@@ -105,15 +92,16 @@ export function TicketSuggestions({
           description: `Generated ${data.suggestions.length} new ticket suggestions`
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error fetching suggestions:', error);
-      if (error.message?.includes('429')) {
+      const message = getErrorMessage(error);
+      if (message.includes('429')) {
         toast({
           title: "Rate Limit",
           description: "Too many requests. Please try again later.",
           variant: "destructive"
         });
-      } else if (error.message?.includes('402')) {
+      } else if (message.includes('402')) {
         toast({
           title: "Usage Limit",
           description: "AI usage limit reached. Please add credits.",
@@ -122,7 +110,7 @@ export function TicketSuggestions({
       } else {
         toast({
           title: "Error",
-          description: error.message || "Failed to generate suggestions",
+          description: message || "Failed to generate suggestions",
           variant: "destructive"
         });
       }
@@ -138,7 +126,7 @@ export function TicketSuggestions({
       const {
         data: ticket,
         error: ticketError
-      } = await supabase.from('tickets').insert({
+      } = await firebase.from<Ticket>('tickets').insert({
         title: suggestion.title,
         description: suggestion.description,
         priority: suggestion.priority,
@@ -149,20 +137,20 @@ export function TicketSuggestions({
 
       // Link feedback sources if available
       if (suggestion.source_refs && suggestion.source_refs.length > 0) {
-        const links = suggestion.source_refs.map((refId: string) => ({
+        const links: TicketFeedbackLink[] = suggestion.source_refs.map((refId: string) => ({
           ticket_id: ticket.id,
           feedback_id: refId
         }));
         const {
           error: linkError
-        } = await supabase.from('ticket_feedback_links').insert(links);
+        } = await firebase.from<TicketFeedbackLink>('ticket_feedback_links').insert(links);
         if (linkError) console.error('Error linking feedback:', linkError);
       }
 
       // Update suggestion status to approved
       const {
         error: updateError
-      } = await supabase.from('ticket_suggestions').update({
+      } = await firebase.from<TicketSuggestion>('ticket_suggestions').update({
         status: 'approved'
       }).eq('id', suggestion.id);
       if (updateError) throw updateError;
@@ -176,11 +164,11 @@ export function TicketSuggestions({
       if (onTicketCreated) {
         onTicketCreated();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating ticket:', error);
       toast({
         title: "Error",
-        description: error.message || "Failed to create ticket",
+        description: getErrorMessage(error) || "Failed to create ticket",
         variant: "destructive"
       });
     } finally {
@@ -197,8 +185,8 @@ export function TicketSuggestions({
     if (!suggestionToDecline) return;
     
     try {
-      const { error } = await supabase
-        .from('ticket_suggestions')
+      const { error } = await firebase
+        .from<TicketSuggestion>('ticket_suggestions')
         .update({ 
           status: 'declined',
           declined_reason: declineReason.trim() || null
@@ -216,11 +204,11 @@ export function TicketSuggestions({
       
       setDeclineModalOpen(false);
       setSuggestionToDecline(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error declining suggestion:', error);
       toast({
         title: "Error",
-        description: "Failed to decline suggestion",
+        description: getErrorMessage(error) || "Failed to decline suggestion",
         variant: "destructive"
       });
     }

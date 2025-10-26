@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/utils";
 
 const FeedbackIngestion = () => {
   const [sourceType, setSourceType] = useState("discord");
@@ -22,7 +23,7 @@ const FeedbackIngestion = () => {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('ingest-feedback', {
+      const { data, error } = await firebase.functions.invoke('ingest-feedback', {
         body: {
           source_type: sourceType,
           external_id: `manual-${Date.now()}`,
@@ -43,10 +44,10 @@ const FeedbackIngestion = () => {
       setContent("");
       setAuthor("");
       setChannel("");
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -58,7 +59,7 @@ const FeedbackIngestion = () => {
     setClusterLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('cluster-feedback');
+      const { data, error } = await firebase.functions.invoke('cluster-feedback');
 
       if (error) throw error;
 
@@ -66,10 +67,10 @@ const FeedbackIngestion = () => {
         title: "Success",
         description: data.message || "Clustering completed",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {

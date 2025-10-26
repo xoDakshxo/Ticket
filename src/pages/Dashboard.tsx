@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DataSourcesManager } from "@/components/DataSourcesManager";
 import { TicketSuggestions } from "@/components/TicketSuggestions";
 import { CommunityChampions } from "@/components/CommunityChampions";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/utils";
 import { MessageSquare, Ticket, Sparkles, RefreshCw, TrendingUp } from "lucide-react";
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -17,43 +18,12 @@ export default function Dashboard() {
   });
   const [generating, setGenerating] = useState(false);
   const { toast } = useToast();
-  useEffect(() => {
-    fetchStats();
-
-    // Real-time subscriptions
-    const feedbackChannel = supabase.channel('feedback-changes').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'feedback_sources'
-    }, () => {
-      fetchStats();
-    }).subscribe();
-    const ticketsChannel = supabase.channel('tickets-changes').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'tickets'
-    }, () => {
-      fetchStats();
-    }).subscribe();
-    const suggestionsChannel = supabase.channel('suggestions-changes').on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'ticket_suggestions'
-    }, () => {
-      fetchStats();
-    }).subscribe();
-    return () => {
-      supabase.removeChannel(feedbackChannel);
-      supabase.removeChannel(ticketsChannel);
-      supabase.removeChannel(suggestionsChannel);
-    };
-  }, []);
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       // Get total feedback count
       const {
         count: feedbackCount
-      } = await supabase.from('feedback_sources').select('*', {
+      } = await firebase.from('feedback_sources').select('*', {
         count: 'exact',
         head: true
       });
@@ -61,17 +31,17 @@ export default function Dashboard() {
       // Get pending suggestions count
       const {
         count: suggestionsCount
-      } = await supabase.from('ticket_suggestions').select('*', {
+      } = await firebase.from('ticket_suggestions').select('*', {
         count: 'exact',
         head: true
       }).eq('status', 'pending');
 
       // Get created tickets count
-      const { count: ticketsCount } = await supabase
+      const { count: ticketsCount } = await firebase
         .from('tickets')
         .select('*', { count: 'exact', head: true });
 
-      const { count: trendingCount } = await supabase
+      const { count: trendingCount } = await firebase
         .from('ticket_suggestions')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'pending')
@@ -83,15 +53,46 @@ export default function Dashboard() {
         createdTickets: ticketsCount || 0,
         trendingCount: trendingCount || 0
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching stats:', error);
     }
-  };
+  }, []);
+  useEffect(() => {
+    fetchStats();
+
+    // Real-time subscriptions
+    const feedbackChannel = firebase.channel('feedback-changes').on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'feedback_sources'
+    }, () => {
+      fetchStats();
+    }).subscribe();
+    const ticketsChannel = firebase.channel('tickets-changes').on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'tickets'
+    }, () => {
+      fetchStats();
+    }).subscribe();
+    const suggestionsChannel = firebase.channel('suggestions-changes').on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'ticket_suggestions'
+    }, () => {
+      fetchStats();
+    }).subscribe();
+    return () => {
+      firebase.removeChannel(feedbackChannel);
+      firebase.removeChannel(ticketsChannel);
+      firebase.removeChannel(suggestionsChannel);
+    };
+  }, [fetchStats]);
 
   const handleGenerateSuggestions = async () => {
     try {
       setGenerating(true);
-      const { data, error } = await supabase.functions.invoke('suggest-tickets');
+      const { data, error } = await firebase.functions.invoke('suggestTickets');
       
       if (error) throw error;
       
@@ -102,15 +103,16 @@ export default function Dashboard() {
           description: `Generated ${data.suggestions.length} new ticket suggestions`
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error generating suggestions:', error);
-      if (error.message?.includes('429')) {
+      const message = getErrorMessage(error);
+      if (message.includes('429')) {
         toast({
           title: "Rate Limit",
           description: "Too many requests. Please try again later.",
           variant: "destructive"
         });
-      } else if (error.message?.includes('402')) {
+      } else if (message.includes('402')) {
         toast({
           title: "Usage Limit",
           description: "AI usage limit reached. Please add credits.",
@@ -119,7 +121,7 @@ export default function Dashboard() {
       } else {
         toast({
           title: "Error",
-          description: error.message || "Failed to generate suggestions",
+          description: message || "Failed to generate suggestions",
           variant: "destructive"
         });
       }

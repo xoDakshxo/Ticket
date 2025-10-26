@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { supabase } from "@/lib/firebase";
+import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/components/ThemeProvider";
 interface LayoutProps {
@@ -39,7 +39,7 @@ export function Layout({
   } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    await firebase.auth.signOut();
     toast({
       title: "Signed out successfully"
     });
