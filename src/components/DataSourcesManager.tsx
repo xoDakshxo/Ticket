@@ -23,6 +23,9 @@ interface DataSource {
   created_at: string;
 }
 
+const POST_LIMIT_CAP = 400;
+const MAX_DATE_RANGE_DAYS = 90;
+
 export const DataSourcesManager = () => {
   const [sources, setSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,7 +36,7 @@ export const DataSourcesManager = () => {
   const [syncingSourceId, setSyncingSourceId] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncStatus, setSyncStatus] = useState("");
-  const [postLimit, setPostLimit] = useState(100);
+  const [postLimit, setPostLimit] = useState(Math.min(100, POST_LIMIT_CAP));
   const [dateRange, setDateRange] = useState({
     startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
     endDate: new Date()
@@ -107,6 +110,17 @@ export const DataSourcesManager = () => {
       return;
     }
 
+    const diffTime = dateRange.endDate.getTime() - dateRange.startDate.getTime();
+    const diffDays = Math.max(1, Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1);
+    if (diffDays > MAX_DATE_RANGE_DAYS) {
+      toast({
+        title: "Date range too large",
+        description: `Please select a range of ${MAX_DATE_RANGE_DAYS} days or less to keep syncs fast.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     setAdding(true);
     try {
 
@@ -164,13 +178,15 @@ export const DataSourcesManager = () => {
         });
       }, 1500);
 
+      const sanitizedLimit = Math.min(Math.max(Math.floor(postLimit), 1), POST_LIMIT_CAP);
+
       // Start background sync (no timeout - let it run as long as needed)
       firebase.functions.invoke('redditSync', {
         body: {
           subreddit: cleanSubreddit,
           user_id: user.uid,
           source_config_id: insertData.id,
-          limit: postLimit,
+          limit: sanitizedLimit,
           start_date: dateRange.startDate.toISOString().split('T')[0],
           end_date: dateRange.endDate.toISOString().split('T')[0]
         }
@@ -190,13 +206,19 @@ export const DataSourcesManager = () => {
           toast({
             title: "Sync Failed",
             description: errorMsg.includes('deadline')
-              ? `Timeout: Too many posts (${postLimit}). Try reducing the limit or date range.`
+              ? `Timeout: Processing ${sanitizedLimit} posts took too long. Try reducing the post limit or narrowing the date range.`
               : errorMsg || "Unknown error occurred",
             variant: "destructive",
           });
         } else {
-          const postsSynced = syncData?.posts_synced || 0;
-          setSyncStatus("✨ Finishing up...");
+          const postsSynced = syncData?.posts_synced ?? 0;
+          const successMessage = syncData?.message ?? `Successfully synced ${postsSynced} posts from r/${cleanSubreddit}`;
+          const warnings = Array.isArray(syncData?.warnings) ? syncData.warnings : [];
+          if (syncData?.metadata) {
+            console.log('Reddit sync stats:', syncData.metadata);
+          }
+
+          setSyncStatus(successMessage);
           setSyncProgress(100);
 
           setTimeout(() => {
@@ -204,8 +226,16 @@ export const DataSourcesManager = () => {
             setSyncProgress(0);
             toast({
               title: "🎉 Sync Complete",
-              description: `Successfully synced ${postsSynced} posts from r/${cleanSubreddit}`,
+              description: successMessage,
             });
+
+            if (warnings.length > 0) {
+              console.warn('Reddit sync warnings:', warnings);
+              toast({
+                title: "Heads up",
+                description: warnings.join('\n'),
+              });
+            }
 
             // Auto-generate suggestions if enough new feedback collected
             if (postsSynced >= 10) {
@@ -332,7 +362,7 @@ export const DataSourcesManager = () => {
           <div>
             <CardTitle>Reddit Threads</CardTitle>
             <CardDescription>
-              Add and manage subreddit threads to analyze
+              Add and manage subreddit threads to analyze (max {MAX_DATE_RANGE_DAYS}-day range)
             </CardDescription>
           </div>
           <Button
@@ -418,14 +448,22 @@ export const DataSourcesManager = () => {
             <Input
               type="number"
               min="1"
-              max="1000"
+              max={POST_LIMIT_CAP}
               value={postLimit}
-              onChange={(e) => setPostLimit(Number(e.target.value))}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                if (!Number.isFinite(value)) {
+                  setPostLimit(1);
+                  return;
+                }
+                const clamped = Math.min(Math.max(Math.floor(value), 1), POST_LIMIT_CAP);
+                setPostLimit(clamped);
+              }}
               placeholder="Number of posts to sync"
               className="w-full"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Lower limits sync faster. Recommended: 50-100 posts
+              Lower limits sync faster. Recommended: 50-100 posts (max {POST_LIMIT_CAP})
             </p>
           </div>
 

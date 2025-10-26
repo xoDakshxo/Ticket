@@ -41,6 +41,8 @@ export interface FeedbackSource {
     url: string;
     original_title?: string;
     summarized: boolean;
+    summary_source?: 'gemini' | 'fallback';
+    summary_generated_at?: FirebaseFirestore.FieldValue | FirebaseFirestore.Timestamp;
   };
   user_id: string;
   source_config_id: string;
@@ -59,4 +61,5 @@ export interface SummarizedPost {
   summary: string;
   key_points: string[];
   sentiment: 'positive' | 'negative' | 'neutral' | 'mixed';
+  source: 'gemini' | 'fallback';
 }
