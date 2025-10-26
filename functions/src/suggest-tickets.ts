@@ -5,7 +5,7 @@
 
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 interface GeneratedSuggestion {
   title: string;
@@ -19,15 +19,18 @@ interface GeneratedSuggestion {
 const db = admin.firestore();
 
 // Initialize Gemini
-let genAI: GoogleGenerativeAI;
+let genAI: GoogleGenAI;
+const GEMINI_MODEL = functions.config().gemini?.model
+  || process.env.GEMINI_MODEL
+  || 'gemini-2.5-flash';
 
-function getGeminiClient(): GoogleGenerativeAI {
+function getGeminiClient(): GoogleGenAI {
   if (!genAI) {
     const apiKey = functions.config().gemini?.api_key || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error('Gemini API key not configured');
     }
-    genAI = new GoogleGenerativeAI(apiKey);
+    genAI = new GoogleGenAI({ apiKey });
   }
   return genAI;
 }
@@ -80,7 +83,7 @@ export const suggestTickets = functions
 
     // Call Gemini to analyze and generate suggestions
     const gemini = getGeminiClient();
-    const model = gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    console.log('[gemini] suggestTickets model', GEMINI_MODEL);
 
     const prompt = `You are a product manager analyzing user feedback to create actionable tickets.
 
@@ -108,8 +111,12 @@ Return ONLY valid JSON array, no markdown:
   }
 ]`;
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+    const response = await gemini.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+    });
+
+    const responseText = response.text || '';
 
     // Parse response
     const cleanText = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();

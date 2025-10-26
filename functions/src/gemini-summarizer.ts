@@ -3,7 +3,7 @@
  * Processes Reddit posts into concise, actionable feedback
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { RedditPost, SummarizedPost } from './types';
 import * as functions from 'firebase-functions/v1';
 
@@ -15,18 +15,18 @@ interface GeminiSummaryItem {
 }
 
 // Initialize Gemini
-let genAI: GoogleGenerativeAI;
+let genAI: GoogleGenAI;
 const GEMINI_MODEL = functions.config().gemini?.model
   || process.env.GEMINI_MODEL
   || 'gemini-2.5-flash';
 
-function getGeminiClient(): GoogleGenerativeAI {
+function getGeminiClient(): GoogleGenAI {
   if (!genAI) {
     const apiKey = functions.config().gemini?.api_key || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error('Gemini API key not configured. Set it with: firebase functions:config:set gemini.api_key="AIzaSyAqC7_Ss9Cu4StgzEnurlV6KyR6h8_ou0s"');
+      throw new Error('Gemini API key not configured. Set it with: firebase functions:config:set gemini.api_key="YOUR_API_KEY"');
     }
-    genAI = new GoogleGenerativeAI(apiKey);
+    genAI = new GoogleGenAI({ apiKey });
   }
   return genAI;
 }
@@ -42,7 +42,6 @@ const BATCH_SIZE = 5;
 async function summarizeSinglePost(post: RedditPost): Promise<SummarizedPost> {
   const gemini = getGeminiClient();
   console.log('[gemini] summarizeSinglePost model', GEMINI_MODEL);
-  const model = gemini.getGenerativeModel({ model: GEMINI_MODEL });
 
   const fullText = `${post.title}\n\n${post.selftext || ''}`.trim();
 
@@ -63,9 +62,12 @@ Focus on extracting actionable product feedback or user pain points. Be concise 
 Return ONLY valid JSON, no markdown formatting.`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const text = response.text();
+    const response = await gemini.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+    });
+
+    const text = response.text || '';
 
     // Remove markdown code blocks if present
     const cleanText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
@@ -162,7 +164,6 @@ export function formatPostContent(post: RedditPost, summary: SummarizedPost): st
 export async function bulkSummarizeWithContext(posts: RedditPost[]): Promise<Map<string, SummarizedPost>> {
   const gemini = getGeminiClient();
   console.log('[gemini] bulkSummarizeWithContext model', GEMINI_MODEL);
-  const model = gemini.getGenerativeModel({ model: GEMINI_MODEL });
 
   const summaries = new Map<string, SummarizedPost>();
 
@@ -189,8 +190,12 @@ Return a JSON array where each object has:
 Return ONLY valid JSON array, no markdown.`;
 
     try {
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
+      const response = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+      });
+
+      const text = response.text || '';
       const cleanText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
       const parsed = JSON.parse(cleanText) as unknown;
