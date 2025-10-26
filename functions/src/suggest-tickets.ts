@@ -38,6 +38,7 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 export const suggestTickets = functions
+  .region('asia-south1')
   .runWith({
     timeoutSeconds: 300,
     memory: '512MB'

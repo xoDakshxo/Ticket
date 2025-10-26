@@ -31,122 +31,47 @@ function getGeminiClient(): GoogleGenAI {
   return genAI;
 }
 
-/**
- * Batch size for Gemini processing (to stay within rate limits)
- */
-const BATCH_SIZE = 5;
+const BULK_BATCH_SIZE = Math.max(1, Number(functions.config().gemini?.batch_size) || 20);
+const BULK_MAX_CONCURRENCY = Math.max(1, Number(functions.config().gemini?.batch_concurrency) || 3);
+const BULK_INTER_BATCH_DELAY_MS = Math.max(0, Number(functions.config().gemini?.batch_delay_ms) || 800);
+const GEMINI_REQUEST_TIMEOUT_MS = Math.max(1000, Number(functions.config().gemini?.request_timeout_ms) || 60000);
+const MAX_CONTENT_LENGTH = Math.max(500, Number(functions.config().gemini?.content_max_chars) || 2000);
+const FALLBACK_SUMMARY_LENGTH = 500;
+const ALLOWED_SENTIMENTS: SummarizedPost['sentiment'][] = ['positive', 'negative', 'neutral', 'mixed'];
 
-/**
- * Summarizes a single Reddit post using Gemini
- */
-async function summarizeSinglePost(post: RedditPost): Promise<SummarizedPost> {
-  const gemini = getGeminiClient();
-  console.log('[gemini] summarizeSinglePost model', GEMINI_MODEL);
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-  const fullText = `${post.title}\n\n${post.selftext || ''}`.trim();
+const chunkArray = <T>(items: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+};
 
-  const prompt = `You are analyzing user feedback from Reddit to extract actionable product insights.
+const truncateText = (value: string, maxLength: number): string => {
+  if (!value) return '';
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 3)}...`;
+};
 
-**POST DETAILS:**
-Title: ${post.title}
-Content: ${post.selftext || '(No additional content)'}
-Engagement: ${post.score} upvotes | ${post.num_comments} comments
-
-**YOUR TASK:**
-Analyze this post and extract the core feedback, focusing on:
-- What problem or need is the user expressing?
-- What specific features or changes are mentioned?
-- What pain points or frustrations are evident?
-- What is the user trying to accomplish?
-
-**OUTPUT FORMAT (JSON):**
-{
-  "summary": "2-3 sentence summary focusing on the actionable feedback or main issue",
-  "key_points": [
-    "Specific, actionable insight 1",
-    "Specific, actionable insight 2",
-    "Specific, actionable insight 3"
-  ],
-  "sentiment": "positive/negative/neutral/mixed"
-}
-
-**GUIDELINES:**
-- Be specific and actionable (avoid vague statements)
-- Focus on what can be built, fixed, or improved
-- Extract the "why" behind requests when possible
-- If it's a feature request, describe what they want to achieve
-- If it's a complaint, identify the underlying problem
-
-Return ONLY valid JSON, no markdown formatting.`;
+const runWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
+  let timeoutHandle: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
 
   try {
-    const response = await gemini.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-    });
-
-    const text = response.text || '';
-
-    // Remove markdown code blocks if present
-    const cleanText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-    const parsed = JSON.parse(cleanText);
-
-    return {
-      original_title: post.title,
-      summary: parsed.summary || fullText.substring(0, 500),
-      key_points: Array.isArray(parsed.key_points) ? parsed.key_points : [],
-      sentiment: ['positive', 'negative', 'neutral', 'mixed'].includes(parsed.sentiment)
-        ? parsed.sentiment
-        : 'neutral'
-    };
-  } catch (error) {
-    console.error(`Error summarizing post ${post.id}:`, error);
-
-    // Fallback: use original content with basic formatting
-    return {
-      original_title: post.title,
-      summary: fullText.substring(0, 500) + (fullText.length > 500 ? '...' : ''),
-      key_points: [post.title],
-      sentiment: 'neutral'
-    };
-  }
-}
-
-/**
- * Summarizes multiple posts in batches using Gemini
- */
-export async function summarizeRedditPosts(posts: RedditPost[]): Promise<Map<string, SummarizedPost>> {
-  const summaries = new Map<string, SummarizedPost>();
-
-  console.log(`Starting summarization of ${posts.length} posts using Gemini model ${GEMINI_MODEL}...`);
-
-  // Process in batches to avoid rate limits
-  for (let i = 0; i < posts.length; i += BATCH_SIZE) {
-    const batch = posts.slice(i, i + BATCH_SIZE);
-    console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(posts.length / BATCH_SIZE)} (${batch.length} posts)`);
-
-    // Process batch in parallel
-    const batchPromises = batch.map(async (post) => {
-      const summary = await summarizeSinglePost(post);
-      return { id: post.id, summary };
-    });
-
-    const batchResults = await Promise.all(batchPromises);
-
-    // Store results
-    batchResults.forEach(({ id, summary }) => {
-      summaries.set(id, summary);
-    });
-
-    // Small delay between batches to respect rate limits
-    if (i + BATCH_SIZE < posts.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
     }
   }
+};
 
-  console.log(`Successfully summarized ${summaries.size} posts`);
-  return summaries;
+export async function summarizeRedditPosts(posts: RedditPost[]): Promise<Map<string, SummarizedPost>> {
+  return bulkSummarizeWithContext(posts);
 }
 
 /**
@@ -176,26 +101,39 @@ export function formatPostContent(post: RedditPost, summary: SummarizedPost): st
   return sections.join('\n');
 }
 
-/**
- * Alternative: Bulk summarization with context (more efficient for large batches)
- */
-export async function bulkSummarizeWithContext(posts: RedditPost[]): Promise<Map<string, SummarizedPost>> {
-  const gemini = getGeminiClient();
-  console.log('[gemini] bulkSummarizeWithContext model', GEMINI_MODEL);
+export function createFallbackSummary(post: RedditPost, overrides: Partial<SummarizedPost> = {}): SummarizedPost {
+  const fullText = `${post.title}\n\n${post.selftext || ''}`.trim();
+  const summaryText = overrides.summary
+    ?? (fullText ? truncateText(fullText, FALLBACK_SUMMARY_LENGTH) : post.title);
 
-  const summaries = new Map<string, SummarizedPost>();
+  const keyPoints = Array.isArray(overrides.key_points) && overrides.key_points.length > 0
+    ? overrides.key_points
+    : [post.title];
 
-  // Process in larger batches for bulk context (increased to reduce API calls)
-  const BULK_BATCH_SIZE = 25;
+  const sentiment = overrides.sentiment && ALLOWED_SENTIMENTS.includes(overrides.sentiment as SummarizedPost['sentiment'])
+    ? overrides.sentiment as SummarizedPost['sentiment']
+    : 'neutral';
 
-  for (let i = 0; i < posts.length; i += BULK_BATCH_SIZE) {
-    const batch = posts.slice(i, i + BULK_BATCH_SIZE);
+  return {
+    original_title: overrides.original_title ?? post.title,
+    summary: summaryText,
+    key_points: keyPoints,
+    sentiment,
+    source: overrides.source ?? 'fallback'
+  };
+}
 
-    const postsText = batch.map((post, idx) =>
-      `POST ${idx + 1} (ID: ${post.id}):\nTitle: ${post.title}\nContent: ${post.selftext || '(No content)'}\nScore: ${post.score} | Comments: ${post.num_comments}\n`
-    ).join('\n---\n\n');
+const buildBatchPrompt = (batch: RedditPost[]): string => {
+  const postsText = batch.map((post, idx) => {
+    const content = truncateText(post.selftext || '', MAX_CONTENT_LENGTH);
+    const sanitizedContent = content || '(No content)';
+    return `POST ${idx + 1} (ID: ${post.id}):
+Title: ${post.title}
+Content: ${sanitizedContent}
+Score: ${post.score} | Comments: ${post.num_comments}`;
+  }).join('\n---\n\n');
 
-    const prompt = `You are analyzing user feedback from Reddit to extract actionable product insights.
+  return `You are analyzing user feedback from Reddit to extract actionable product insights.
 
 **POSTS TO ANALYZE:**
 ${postsText}
@@ -222,51 +160,119 @@ Return a JSON array where each object has:
 - If discussing bugs, describe the impact
 
 Return ONLY valid JSON array, no markdown formatting or code blocks.`;
+};
 
-    try {
-      const response = await gemini.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: prompt,
-      });
+const processGeminiBatch = async (batch: RedditPost[]): Promise<Map<string, SummarizedPost>> => {
+  const gemini = getGeminiClient();
+  const prompt = buildBatchPrompt(batch);
 
-      const text = response.text || '';
-      const cleanText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const response = await runWithTimeout(
+    gemini.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+    }),
+    GEMINI_REQUEST_TIMEOUT_MS,
+    `Gemini batch request timed out after ${GEMINI_REQUEST_TIMEOUT_MS}ms`
+  );
 
-      const parsed = JSON.parse(cleanText) as unknown;
+  const text = response.text || '';
+  const cleanText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
-      if (Array.isArray(parsed)) {
-        (parsed as GeminiSummaryItem[]).forEach((item) => {
-          const post = batch.find(p => p.id === item.post_id);
-          if (post) {
-            const sentiment = (item.sentiment ?? 'neutral') as SummarizedPost['sentiment'];
-            summaries.set(post.id, {
-              original_title: post.title,
-              summary: item.summary || post.title,
-              key_points: item.key_points || [],
-              sentiment
-            });
-          }
-        });
-      }
-    } catch (error) {
-      console.error('Bulk summarization failed for batch, using fallback content:', error);
-      // Use basic fallback for failed batch (don't make more API calls!)
-      for (const post of batch) {
-        const fullText = `${post.title}\n\n${post.selftext || ''}`.trim();
-        summaries.set(post.id, {
-          original_title: post.title,
-          summary: fullText.substring(0, 500) + (fullText.length > 500 ? '...' : ''),
-          key_points: [post.title],
-          sentiment: 'neutral'
-        });
-      }
+  let parsed: GeminiSummaryItem[];
+  try {
+    const json = JSON.parse(cleanText) as unknown;
+    parsed = Array.isArray(json)
+      ? (json as GeminiSummaryItem[])
+      : [json as GeminiSummaryItem];
+  } catch (error) {
+    throw new Error(`Failed to parse Gemini response: ${(error as Error)?.message ?? error}`);
+  }
+
+  const batchSummaries = new Map<string, SummarizedPost>();
+
+  parsed.forEach((item) => {
+    if (!item?.post_id) {
+      return;
     }
 
-    // Rate limiting delay (increased to avoid hitting 20 RPM)
-    if (i + BULK_BATCH_SIZE < posts.length) {
-      await new Promise(resolve => setTimeout(resolve, 4000));
+    const post = batch.find((p) => p.id === item.post_id);
+    if (!post) {
+      return;
+    }
+
+    const fallbackSummary = createFallbackSummary(post);
+
+    const summaryText = item.summary && item.summary.trim().length > 0
+      ? truncateText(item.summary.trim(), FALLBACK_SUMMARY_LENGTH)
+      : fallbackSummary.summary;
+
+    const sentiment = item.sentiment && ALLOWED_SENTIMENTS.includes(item.sentiment as SummarizedPost['sentiment'])
+      ? item.sentiment as SummarizedPost['sentiment']
+      : fallbackSummary.sentiment;
+
+    const keyPoints = Array.isArray(item.key_points) && item.key_points.length > 0
+      ? item.key_points
+      : fallbackSummary.key_points;
+
+    batchSummaries.set(post.id, {
+      original_title: post.title,
+      summary: summaryText,
+      key_points: keyPoints,
+      sentiment,
+      source: 'gemini',
+    });
+  });
+
+  batch.forEach((post) => {
+    if (!batchSummaries.has(post.id)) {
+      batchSummaries.set(post.id, createFallbackSummary(post));
+    }
+  });
+
+  return batchSummaries;
+};
+
+export async function bulkSummarizeWithContext(posts: RedditPost[]): Promise<Map<string, SummarizedPost>> {
+  console.log('[gemini] bulkSummarizeWithContext model', GEMINI_MODEL);
+
+  const summaries = new Map<string, SummarizedPost>();
+  if (posts.length === 0) {
+    return summaries;
+  }
+
+  posts.forEach((post) => {
+    summaries.set(post.id, createFallbackSummary(post));
+  });
+
+  const batches = chunkArray(posts, BULK_BATCH_SIZE);
+  console.log(`[gemini] Processing ${posts.length} posts in ${batches.length} batches (size=${BULK_BATCH_SIZE}, concurrency=${BULK_MAX_CONCURRENCY})`);
+
+  for (let i = 0; i < batches.length; i += BULK_MAX_CONCURRENCY) {
+    const slice = batches.slice(i, i + BULK_MAX_CONCURRENCY);
+    const results = await Promise.allSettled(slice.map(processGeminiBatch));
+
+    results.forEach((result, idx) => {
+      const batch = slice[idx];
+      if (result.status === 'fulfilled') {
+        result.value.forEach((summary, postId) => {
+          summaries.set(postId, summary);
+        });
+      } else {
+        console.error('Gemini batch failed, falling back to raw content', {
+          error: result.reason instanceof Error ? result.reason.message : result.reason,
+          batchSize: batch.length,
+        });
+        batch.forEach((post) => {
+          summaries.set(post.id, createFallbackSummary(post));
+        });
+      }
+    });
+
+    if (i + BULK_MAX_CONCURRENCY < batches.length && BULK_INTER_BATCH_DELAY_MS > 0) {
+      await delay(BULK_INTER_BATCH_DELAY_MS);
     }
   }
 
+  console.log(`Successfully generated summaries for ${summaries.size} posts (requested ${posts.length})`);
   return summaries;
 }

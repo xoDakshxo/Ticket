@@ -531,7 +531,7 @@ export const firebase = {
     invoke: async (functionName: string, options?: Record<string, unknown>) => {
       try {
         const { getFunctions, httpsCallable } = await import('firebase/functions');
-        const functions = getFunctions(app);
+        const functions = getFunctions(app, 'asia-south1');
         const callable = httpsCallable(functions, functionName);
 
         const result = await callable(options ?? {});

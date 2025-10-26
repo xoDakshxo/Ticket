@@ -13,18 +13,25 @@ import {
 } from './reddit-api';
 import {
   bulkSummarizeWithContext,
-  formatPostContent
+  formatPostContent,
+  createFallbackSummary
 } from './gemini-summarizer';
 
 // Initialize Firebase Admin
 admin.initializeApp();
 const db = admin.firestore();
 
+const MAX_POST_LIMIT = 400;
+const MAX_SUMMARY_COUNT = 400;
+const MAX_DATE_RANGE_DAYS = 90;
+const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
+
 /**
  * Reddit Sync Function
  * Fetches posts from Reddit, summarizes them with Gemini, and stores in Firestore
  */
 export const redditSync = functions
+  .region('asia-south1')
   .runWith({
     timeoutSeconds: 540, // 9 minutes max
     memory: '1GB'
@@ -75,6 +82,8 @@ export const redditSync = functions
     console.log(`Starting Reddit sync for r/${subreddit}`);
 
     try {
+      const jobStartedAt = Date.now();
+
       // Step 1: Validate subreddit exists
       console.log('Validating subreddit...');
       const isValid = await validateSubreddit(subreddit);
@@ -103,9 +112,28 @@ export const redditSync = functions
         );
       }
 
+      const rangeDays = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / MILLIS_PER_DAY) + 1);
+      if (rangeDays > MAX_DATE_RANGE_DAYS) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          `Date range cannot exceed ${MAX_DATE_RANGE_DAYS} days`
+        );
+      }
+
+      const requestedLimit = typeof limit === 'number' ? limit : Number(limit);
+      const normalizedLimit = Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.floor(requestedLimit)
+        : Math.min(100, MAX_POST_LIMIT);
+      const effectiveLimit = Math.min(normalizedLimit, MAX_POST_LIMIT);
+      const limitCapped = effectiveLimit !== normalizedLimit;
+
+      if (limitCapped) {
+        console.log(`Requested limit ${normalizedLimit} capped at ${effectiveLimit} (max ${MAX_POST_LIMIT})`);
+      }
+
       // Step 3: Fetch Reddit posts
-      console.log(`Fetching posts from r/${subreddit} between ${start_date} and ${end_date}`);
-      const posts = await fetchRedditPosts(subreddit, startDate, endDate, limit);
+      console.log(`Fetching up to ${effectiveLimit} posts from r/${subreddit} between ${start_date} and ${end_date}`);
+      const posts = await fetchRedditPosts(subreddit, startDate, endDate, effectiveLimit);
 
       if (posts.length === 0) {
         return {
@@ -118,11 +146,21 @@ export const redditSync = functions
 
       // Step 4: Summarize posts with Gemini
       console.log('Summarizing posts with Gemini AI...');
+      const postsForSummaries = posts.slice(0, MAX_SUMMARY_COUNT);
+      const summaryLimitHit = posts.length > MAX_SUMMARY_COUNT;
 
-      // Use bulk summarization (batches posts to reduce API calls)
-      const summaries = await bulkSummarizeWithContext(posts);
+      if (summaryLimitHit) {
+        console.log(`Summary limit reached: processing first ${MAX_SUMMARY_COUNT} posts out of ${posts.length}`);
+      }
 
-      console.log(`Summarized ${summaries.size} posts`);
+      const summaries: Map<string, ReturnType<typeof createFallbackSummary>> = postsForSummaries.length > 0
+        ? await bulkSummarizeWithContext(postsForSummaries)
+        : new Map();
+
+      console.log(`Summarized ${postsForSummaries.length} posts (map size: ${summaries.size})`);
+
+      let aiSummaryCount = 0;
+      let fallbackSummaryCount = 0;
 
       // Step 5: Store in Firestore
       console.log('Storing feedback in Firestore...');
@@ -131,14 +169,22 @@ export const redditSync = functions
       let totalSynced = 0;
 
       for (const post of posts) {
-        const summary = summaries.get(post.id);
-        if (!summary) {
-          console.warn(`No summary found for post ${post.id}, skipping`);
-          continue;
+        const summaryRecord = summaries.get(post.id);
+        const finalSummary = summaryRecord ?? createFallbackSummary(post);
+        const usedAiSummary = summaryRecord?.source === 'gemini';
+
+        if (!usedAiSummary && summaries.has(post.id)) {
+          console.warn(`Gemini summary unavailable for post ${post.id}, falling back to quick summary`);
+        }
+
+        if (usedAiSummary) {
+          aiSummaryCount++;
+        } else {
+          fallbackSummaryCount++;
         }
 
         // Format content with summary
-        const formattedContent = formatPostContent(post, summary);
+        const formattedContent = formatPostContent(post, finalSummary);
 
         // Create feedback source document
         const feedbackData: Omit<FeedbackSource, 'created_at'> & { created_at: admin.firestore.FieldValue } = {
@@ -155,7 +201,9 @@ export const redditSync = functions
             num_comments: post.num_comments,
             url: post.url,
             original_title: post.title,
-            summarized: true
+            summarized: usedAiSummary,
+            summary_source: finalSummary.source,
+            summary_generated_at: admin.firestore.FieldValue.serverTimestamp()
           },
           user_id: context.auth.uid,
           source_config_id: source_config_id
@@ -182,18 +230,91 @@ export const redditSync = functions
         await batch.commit();
       }
 
-      console.log(`✅ Successfully synced ${totalSynced} posts from r/${subreddit}`);
+      const processingTimeMs = Date.now() - jobStartedAt;
 
-      // Return result
-      return {
+      console.log(`✅ Successfully synced ${totalSynced} posts from r/${subreddit}`, {
+        totalPostsFetched: posts.length,
+        aiSummaryCount,
+        fallbackSummaryCount,
+        processingTimeMs,
+        limitCapped,
+        summaryLimitHit
+      });
+
+      const messageSegments: string[] = [
+        `Synced ${totalSynced} posts from r/${subreddit}.`
+      ];
+
+      if (limitCapped) {
+        messageSegments.push(`Requested limit ${normalizedLimit} capped at ${effectiveLimit}.`);
+      }
+
+      if (summaryLimitHit) {
+        messageSegments.push(`AI summaries applied to ${aiSummaryCount} posts; ${fallbackSummaryCount} stored with quick summaries.`);
+      } else if (aiSummaryCount === 0) {
+        messageSegments.push('Gemini summaries unavailable this run; used quick summaries instead.');
+      }
+
+      const message = messageSegments.join(' ');
+
+      const warnings: string[] = [];
+      if (limitCapped) {
+        warnings.push(`Limit capped at ${effectiveLimit} posts per sync for reliability.`);
+      }
+      if (summaryLimitHit) {
+        warnings.push(`AI summaries generated for the first ${postsForSummaries.length} posts. The remaining ${posts.length - postsForSummaries.length} posts use quick summaries.`);
+      }
+      if (aiSummaryCount === 0) {
+        warnings.push('Gemini API returned no summaries; stored quick summaries for this sync.');
+      }
+
+      const responsePayload: {
+        posts_synced: number;
+        message: string;
+        subreddit: string;
+        date_range: { start: string; end: string };
+        metadata: {
+          limit_requested: number;
+          limit_applied: number;
+          limit_capped: boolean;
+          summary_limit: number;
+          summary_limit_reached: boolean;
+          summary_target_count: number;
+          ai_summary_count: number;
+          fallback_summary_count: number;
+          processing_time_ms: number;
+          posts_examined: number;
+          range_days: number;
+        };
+        warnings?: string[];
+      } = {
         posts_synced: totalSynced,
-        message: `Successfully synced ${totalSynced} posts from r/${subreddit}`,
+        message,
         subreddit: subreddit,
         date_range: {
           start: start_date,
           end: end_date
+        },
+        metadata: {
+          limit_requested: normalizedLimit,
+          limit_applied: effectiveLimit,
+          limit_capped: limitCapped,
+          summary_limit: MAX_SUMMARY_COUNT,
+          summary_limit_reached: summaryLimitHit,
+          summary_target_count: postsForSummaries.length,
+          ai_summary_count: aiSummaryCount,
+          fallback_summary_count: fallbackSummaryCount,
+          processing_time_ms: processingTimeMs,
+          posts_examined: posts.length,
+          range_days: rangeDays
         }
       };
+
+      if (warnings.length > 0) {
+        responsePayload.warnings = warnings;
+      }
+
+      return responsePayload;
 
     } catch (error: unknown) {
       console.error('Reddit sync error:', error);
@@ -216,13 +337,15 @@ export const redditSync = functions
 /**
  * Health check function for testing
  */
-export const healthCheck = functions.https.onRequest((req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    functions: ['redditSync', 'suggestTickets']
+export const healthCheck = functions
+  .region('asia-south1')
+  .https.onRequest((req, res) => {
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      functions: ['redditSync', 'suggestTickets']
+    });
   });
-});
 
 // Export suggest-tickets function
 export { suggestTickets } from './suggest-tickets';
