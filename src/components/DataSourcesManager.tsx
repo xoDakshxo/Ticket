@@ -10,6 +10,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { cn, getErrorMessage } from "@/lib/utils";
 
 interface DataSource {
@@ -32,21 +33,25 @@ export const DataSourcesManager = () => {
   const [syncingSourceId, setSyncingSourceId] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncStatus, setSyncStatus] = useState("");
+  const [postLimit, setPostLimit] = useState(100);
   const [dateRange, setDateRange] = useState({
     startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
     endDate: new Date()
   });
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const fetchSources = useCallback(async () => {
-    try {
-      const { data: { user } } = await firebase.auth.getUser();
-      if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
+    try {
       const { data, error } = await firebase
         .from('integration_configs')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', user.uid)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
@@ -61,7 +66,7 @@ export const DataSourcesManager = () => {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [user, toast]);
 
   useEffect(() => {
     fetchSources();
@@ -93,10 +98,17 @@ export const DataSourcesManager = () => {
       return;
     }
 
+    if (!user) {
+      toast({
+        title: "Error",
+        description: "Not authenticated",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setAdding(true);
     try {
-      const { data: { user } } = await firebase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
 
       // Clean up subreddit name (remove r/ prefix if present)
       const cleanSubreddit = newSubreddit.replace(/^r\//, '').trim();
@@ -117,7 +129,7 @@ export const DataSourcesManager = () => {
       const { data: insertData, error } = await firebase
         .from('integration_configs')
         .insert({
-          user_id: user.id,
+          user_id: user.uid,
           integration_type: 'reddit',
           config: { subreddit: cleanSubreddit },
           channel: cleanSubreddit,
@@ -152,35 +164,44 @@ export const DataSourcesManager = () => {
         });
       }, 1500);
 
-      // Start background sync
+      // Start background sync (no timeout - let it run as long as needed)
       firebase.functions.invoke('redditSync', {
-        body: { 
+        body: {
           subreddit: cleanSubreddit,
-          user_id: user.id,
+          user_id: user.uid,
           source_config_id: insertData.id,
-          limit: 1000,
+          limit: postLimit,
           start_date: dateRange.startDate.toISOString().split('T')[0],
           end_date: dateRange.endDate.toISOString().split('T')[0]
         }
       }).then(({ data: syncData, error: syncError }) => {
         clearInterval(progressInterval);
         clearInterval(statusInterval);
-        
+
+        console.log('Reddit sync response:', { data: syncData, error: syncError });
+
         if (syncError) {
           console.error('Background sync error:', syncError);
+          const errorMsg = getErrorMessage(syncError);
+
           setSyncingSourceId(null);
+          setSyncProgress(0);
+
           toast({
-            title: "Sync Error",
-            description: "Failed to sync posts",
+            title: "Sync Failed",
+            description: errorMsg.includes('deadline')
+              ? `Timeout: Too many posts (${postLimit}). Try reducing the limit or date range.`
+              : errorMsg || "Unknown error occurred",
             variant: "destructive",
           });
         } else {
           const postsSynced = syncData?.posts_synced || 0;
           setSyncStatus("✨ Finishing up...");
           setSyncProgress(100);
-          
+
           setTimeout(() => {
             setSyncingSourceId(null);
+            setSyncProgress(0);
             toast({
               title: "🎉 Sync Complete",
               description: `Successfully synced ${postsSynced} posts from r/${cleanSubreddit}`,
@@ -206,6 +227,23 @@ export const DataSourcesManager = () => {
             }
           }, 500);
         }
+      }).catch((err) => {
+        clearInterval(progressInterval);
+        clearInterval(statusInterval);
+        console.error('Reddit sync promise error:', err);
+
+        const errorMsg = getErrorMessage(err);
+
+        setSyncingSourceId(null);
+        setSyncProgress(0);
+
+        toast({
+          title: "Sync Failed",
+          description: errorMsg.includes('deadline')
+            ? `Timeout: Processing ${postLimit} posts took too long. Try:\n• Reduce post limit\n• Shorten date range\n• Try again later`
+            : errorMsg || "Unknown error - check console for details",
+          variant: "destructive",
+        });
       });
 
       setNewSubreddit("");
@@ -373,7 +411,24 @@ export const DataSourcesManager = () => {
               </Popover>
             </div>
           </div>
-          
+
+          {/* Post Limit */}
+          <div>
+            <label className="text-sm text-muted-foreground mb-1 block">Post Limit</label>
+            <Input
+              type="number"
+              min="1"
+              max="1000"
+              value={postLimit}
+              onChange={(e) => setPostLimit(Number(e.target.value))}
+              placeholder="Number of posts to sync"
+              className="w-full"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Lower limits sync faster. Recommended: 50-100 posts
+            </p>
+          </div>
+
           <div className="flex gap-2">
             <Input
               placeholder="Subreddit (e.g., lovable or r/lovable)"

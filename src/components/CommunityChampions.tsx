@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Users,
   ExternalLink,
@@ -35,19 +36,27 @@ export function CommunityChampions() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [outreachMessage, setOutreachMessage] = useState("");
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const fetchSuperusers = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      // Fetch top 20% of users by score (minimum 10 users, maximum 50)
+      // Fetch top 20% of users by score (minimum 10 users, maximum 50) for current user
       const { count } = await firebase
         .from('user_profiles')
-        .select('*', { count: 'exact', head: true });
-      
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.uid);
+
       const topPercentCount = Math.min(Math.max(Math.floor((count || 0) * 0.2), 10), 50);
 
       const { data, error } = await firebase
         .from('user_profiles')
         .select('*')
+        .eq('user_id', user.uid)
         .order('superuser_score', { ascending: false })
         .limit(topPercentCount);
 
@@ -63,7 +72,7 @@ export function CommunityChampions() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [user, toast]);
 
   useEffect(() => {
     fetchSuperusers();

@@ -45,19 +45,37 @@ async function summarizeSinglePost(post: RedditPost): Promise<SummarizedPost> {
 
   const fullText = `${post.title}\n\n${post.selftext || ''}`.trim();
 
-  const prompt = `Analyze this Reddit post and provide a structured summary:
+  const prompt = `You are analyzing user feedback from Reddit to extract actionable product insights.
 
+**POST DETAILS:**
 Title: ${post.title}
 Content: ${post.selftext || '(No additional content)'}
-Score: ${post.score} upvotes
-Comments: ${post.num_comments}
+Engagement: ${post.score} upvotes | ${post.num_comments} comments
 
-Provide a JSON response with:
-1. summary: A concise 2-3 sentence summary of the main feedback/issue/discussion
-2. key_points: Array of 2-4 key points or insights (actionable items if applicable)
-3. sentiment: Overall sentiment (positive/negative/neutral/mixed)
+**YOUR TASK:**
+Analyze this post and extract the core feedback, focusing on:
+- What problem or need is the user expressing?
+- What specific features or changes are mentioned?
+- What pain points or frustrations are evident?
+- What is the user trying to accomplish?
 
-Focus on extracting actionable product feedback or user pain points. Be concise and clear.
+**OUTPUT FORMAT (JSON):**
+{
+  "summary": "2-3 sentence summary focusing on the actionable feedback or main issue",
+  "key_points": [
+    "Specific, actionable insight 1",
+    "Specific, actionable insight 2",
+    "Specific, actionable insight 3"
+  ],
+  "sentiment": "positive/negative/neutral/mixed"
+}
+
+**GUIDELINES:**
+- Be specific and actionable (avoid vague statements)
+- Focus on what can be built, fixed, or improved
+- Extract the "why" behind requests when possible
+- If it's a feature request, describe what they want to achieve
+- If it's a complaint, identify the underlying problem
 
 Return ONLY valid JSON, no markdown formatting.`;
 
@@ -167,8 +185,8 @@ export async function bulkSummarizeWithContext(posts: RedditPost[]): Promise<Map
 
   const summaries = new Map<string, SummarizedPost>();
 
-  // Process in larger batches for bulk context
-  const BULK_BATCH_SIZE = 10;
+  // Process in larger batches for bulk context (increased to reduce API calls)
+  const BULK_BATCH_SIZE = 25;
 
   for (let i = 0; i < posts.length; i += BULK_BATCH_SIZE) {
     const batch = posts.slice(i, i + BULK_BATCH_SIZE);
@@ -177,17 +195,33 @@ export async function bulkSummarizeWithContext(posts: RedditPost[]): Promise<Map
       `POST ${idx + 1} (ID: ${post.id}):\nTitle: ${post.title}\nContent: ${post.selftext || '(No content)'}\nScore: ${post.score} | Comments: ${post.num_comments}\n`
     ).join('\n---\n\n');
 
-    const prompt = `Analyze these Reddit posts and provide summaries for each. Extract actionable product feedback and user pain points.
+    const prompt = `You are analyzing user feedback from Reddit to extract actionable product insights.
 
+**POSTS TO ANALYZE:**
 ${postsText}
 
-Return a JSON array where each object has:
-- post_id: The post ID (from "ID: xxx")
-- summary: 2-3 sentence summary
-- key_points: Array of 2-4 key insights
-- sentiment: positive/negative/neutral/mixed
+**YOUR TASK:**
+For each post, identify:
+1. The core problem, request, or feedback
+2. Specific actionable insights (features, fixes, improvements)
+3. User pain points and their underlying causes
+4. What the user is trying to accomplish
 
-Return ONLY valid JSON array, no markdown.`;
+**OUTPUT FORMAT:**
+Return a JSON array where each object has:
+- **post_id**: The post ID (from "ID: xxx")
+- **summary**: 2-3 sentence summary focusing on actionable feedback
+- **key_points**: Array of 2-4 specific, actionable insights
+- **sentiment**: positive/negative/neutral/mixed
+
+**GUIDELINES:**
+- Be specific (avoid "users want improvements" - say WHAT improvement)
+- Focus on buildable, fixable, improvable items
+- Extract the "why" behind requests
+- Identify patterns if multiple users mention similar things
+- If discussing bugs, describe the impact
+
+Return ONLY valid JSON array, no markdown formatting or code blocks.`;
 
     try {
       const response = await gemini.models.generateContent({
@@ -215,17 +249,22 @@ Return ONLY valid JSON array, no markdown.`;
         });
       }
     } catch (error) {
-      console.error('Bulk summarization failed, falling back to individual:', error);
-      // Fallback to individual summarization for this batch
+      console.error('Bulk summarization failed for batch, using fallback content:', error);
+      // Use basic fallback for failed batch (don't make more API calls!)
       for (const post of batch) {
-        const summary = await summarizeSinglePost(post);
-        summaries.set(post.id, summary);
+        const fullText = `${post.title}\n\n${post.selftext || ''}`.trim();
+        summaries.set(post.id, {
+          original_title: post.title,
+          summary: fullText.substring(0, 500) + (fullText.length > 500 ? '...' : ''),
+          key_points: [post.title],
+          sentiment: 'neutral'
+        });
       }
     }
 
-    // Rate limiting delay
+    // Rate limiting delay (increased to avoid hitting 20 RPM)
     if (i + BULK_BATCH_SIZE < posts.length) {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 4000));
     }
   }
 

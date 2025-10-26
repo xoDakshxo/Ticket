@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ExternalLink, Trash2 } from "lucide-react";
 import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { TicketSuggestions } from "@/components/TicketSuggestions";
 import { getErrorMessage } from "@/lib/utils";
 import type { Ticket, TicketFeedbackLink, FeedbackSource, TicketState, TicketPriority } from "@/types/firestore";
@@ -27,14 +28,19 @@ export default function Tickets() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [linkedFeedback, setLinkedFeedback] = useState<LinkedFeedback[]>([]);
   const [filter, setFilter] = useState("all");
-  const {
-    toast
-  } = useToast();
+  const { toast } = useToast();
+  const { user } = useAuth();
+
   const fetchTickets = useCallback(async () => {
+    if (!user) {
+      return;
+    }
+
     try {
       const { data, error } = await firebase
         .from<Ticket>('tickets')
         .select('*')
+        .eq('user_id', user.uid)
         .order('created_at', {
           ascending: false
         });
@@ -50,7 +56,7 @@ export default function Tickets() {
         variant: "destructive"
       });
     }
-  }, [selectedTicket, toast]);
+  }, [user, selectedTicket, toast]);
   const fetchLinkedFeedback = useCallback(async (ticketId: string) => {
     try {
       const {
@@ -76,7 +82,9 @@ export default function Tickets() {
     }
   }, []);
   useEffect(() => {
-    fetchTickets();
+    if (user) {
+      fetchTickets();
+    }
     const channel = firebase.channel('tickets-changes').on('postgres_changes', {
       event: '*',
       schema: 'public',

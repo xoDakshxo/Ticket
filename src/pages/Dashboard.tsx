@@ -7,6 +7,7 @@ import { TicketSuggestions } from "@/components/TicketSuggestions";
 import { CommunityChampions } from "@/components/CommunityChampions";
 import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { getErrorMessage } from "@/lib/utils";
 import { MessageSquare, Ticket, Sparkles, RefreshCw, TrendingUp } from "lucide-react";
 export default function Dashboard() {
@@ -18,32 +19,41 @@ export default function Dashboard() {
   });
   const [generating, setGenerating] = useState(false);
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
+
   const fetchStats = useCallback(async () => {
+    if (!user) {
+      return;
+    }
+
     try {
-      // Get total feedback count
+
+      // Get total feedback count for current user
       const {
         count: feedbackCount
       } = await firebase.from('feedback_sources').select('*', {
         count: 'exact',
         head: true
-      });
+      }).eq('user_id', user.uid);
 
-      // Get pending suggestions count
+      // Get pending suggestions count for current user
       const {
         count: suggestionsCount
       } = await firebase.from('ticket_suggestions').select('*', {
         count: 'exact',
         head: true
-      }).eq('status', 'pending');
+      }).eq('user_id', user.uid).eq('status', 'pending');
 
-      // Get created tickets count
+      // Get created tickets count for current user
       const { count: ticketsCount } = await firebase
         .from('tickets')
-        .select('*', { count: 'exact', head: true });
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.uid);
 
       const { count: trendingCount } = await firebase
         .from('ticket_suggestions')
         .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.uid)
         .eq('status', 'pending')
         .eq('is_trending', true);
 
@@ -56,9 +66,11 @@ export default function Dashboard() {
     } catch (error: unknown) {
       console.error('Error fetching stats:', error);
     }
-  }, []);
+  }, [user]);
   useEffect(() => {
-    fetchStats();
+    if (user) {
+      fetchStats();
+    }
 
     // Real-time subscriptions
     const feedbackChannel = firebase.channel('feedback-changes').on('postgres_changes', {

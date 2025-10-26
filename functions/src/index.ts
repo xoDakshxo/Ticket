@@ -12,7 +12,6 @@ import {
   cleanSubredditName
 } from './reddit-api';
 import {
-  summarizeRedditPosts,
   bulkSummarizeWithContext,
   formatPostContent
 } from './gemini-summarizer';
@@ -119,16 +118,9 @@ export const redditSync = functions
 
       // Step 4: Summarize posts with Gemini
       console.log('Summarizing posts with Gemini AI...');
-      let summaries;
 
-      try {
-        // Try bulk summarization first (more efficient)
-        summaries = await bulkSummarizeWithContext(posts);
-      } catch (error) {
-        console.warn('Bulk summarization failed, falling back to individual:', error);
-        // Fallback to individual summarization
-        summaries = await summarizeRedditPosts(posts);
-      }
+      // Use bulk summarization (batches posts to reduce API calls)
+      const summaries = await bulkSummarizeWithContext(posts);
 
       console.log(`Summarized ${summaries.size} posts`);
 

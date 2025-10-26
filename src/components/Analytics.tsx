@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { firebase } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { getErrorMessage } from "@/lib/utils";
 import type { Ticket } from "@/types/firestore";
 
@@ -25,15 +26,21 @@ const Analytics = () => {
   });
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const fetchMetrics = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      type ClusterRecord = { id: string; status?: string };
+      type ClusterRecord = { id: string; status?: string; user_id?: string };
       const [clusters, tickets, events, feedback] = await Promise.all([
-        firebase.from<ClusterRecord>('clusters').select('status', { count: 'exact' }),
-        firebase.from<Ticket>('tickets').select('state', { count: 'exact' }),
-        firebase.from('events').select('*', { count: 'exact' }),
-        firebase.from('feedback_sources').select('*', { count: 'exact' }),
+        firebase.from<ClusterRecord>('clusters').select('status', { count: 'exact' }).eq('user_id', user.uid),
+        firebase.from<Ticket>('tickets').select('state', { count: 'exact' }).eq('user_id', user.uid),
+        firebase.from('events').select('*', { count: 'exact' }).eq('user_id', user.uid),
+        firebase.from('feedback_sources').select('*', { count: 'exact' }).eq('user_id', user.uid),
       ]);
 
       const activeClusters = clusters.data?.filter((cluster) => cluster.status === 'active').length ?? 0;
@@ -56,7 +63,7 @@ const Analytics = () => {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [user, toast]);
 
   useEffect(() => {
     fetchMetrics();

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { firebase } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { Sparkles, ExternalLink, ThumbsUp, ThumbsDown, RefreshCw, Filter, TrendingUp, Zap } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,14 +38,20 @@ export function TicketSuggestions({
   const [declineModalOpen, setDeclineModalOpen] = useState(false);
   const [suggestionToDecline, setSuggestionToDecline] = useState<TicketSuggestion | null>(null);
   const [declineReason, setDeclineReason] = useState("");
-  const {
-    toast
-  } = useToast();
+  const { toast } = useToast();
+  const { user } = useAuth();
+
   const fetchExistingSuggestions = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     try {
       const { data, error } = await firebase
         .from<TicketSuggestion>('ticket_suggestions')
         .select('*')
+        .eq('user_id', user.uid)
         .eq('status', 'pending')
         .order('impact_score', {
           ascending: false
@@ -53,14 +60,14 @@ export function TicketSuggestions({
 
       console.log('Fetched suggestions:', data);
       console.log('Trending suggestions:', data?.filter(s => s.is_trending));
-      
+
       setSuggestions((data || []) as TicketSuggestion[]);
     } catch (error: unknown) {
       console.error('Error fetching suggestions:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
   useEffect(() => {
     fetchExistingSuggestions();
 
@@ -119,6 +126,15 @@ export function TicketSuggestions({
     }
   };
   const handleApprove = async (suggestion: TicketSuggestion) => {
+    if (!user) {
+      toast({
+        title: "Error",
+        description: "Not authenticated",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
       setGeneratingTicket(suggestion.id);
 
@@ -131,7 +147,8 @@ export function TicketSuggestions({
         description: suggestion.description,
         priority: suggestion.priority,
         impact_score: suggestion.impact_score,
-        state: 'backlog'
+        state: 'backlog',
+        user_id: user.uid
       }).select().single();
       if (ticketError) throw ticketError;
 
