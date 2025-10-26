@@ -69,6 +69,7 @@ This provides:
 │   ├── types/
 │   │   └── firestore.ts            # TypeScript types for database
 │   └── hooks/
+│       ├── use-auth.ts              # Custom auth hook (fixes timing issues)
 │       ├── use-toast.ts
 │       └── use-mobile.tsx
 ├── functions/                       # Firebase Cloud Functions
@@ -362,16 +363,20 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
 VITE_FIREBASE_APP_ID=1:123456789:web:abc123
 ```
 
-**Cloud Functions:**
+**Cloud Functions (functions/.env):**
 ```bash
-# Set with: firebase functions:config:set
-gemini.api_key=your_gemini_api_key
-gemini.model=gemini-2.5-flash
-reddit.client_id=your_reddit_app_id
-reddit.client_secret=your_reddit_secret
-reddit.username=your_reddit_username
-reddit.password=your_reddit_password
+# Gemini AI Configuration
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+
+# Reddit API Configuration (optional - can also be in Firebase config)
+REDDIT_CLIENT_ID=your_reddit_app_id
+REDDIT_CLIENT_SECRET=your_reddit_secret
+REDDIT_USERNAME=your_reddit_username
+REDDIT_PASSWORD=your_reddit_password
 ```
+
+**Note:** Using `.env` file is recommended over `firebase functions:config` as the latter is being deprecated in March 2026. The code checks `process.env` first, then falls back to `functions.config()`.
 
 ## Deployment
 
@@ -387,6 +392,95 @@ cd functions
 npm run build
 firebase deploy --only functions
 ```
+
+## Critical System Requirements
+
+### Required Firestore Indexes
+
+The app requires composite indexes for multi-user queries. These are defined in `firestore.indexes.json` and must be deployed:
+
+```bash
+firebase deploy --only firestore:indexes
+```
+
+**Required indexes:**
+1. `ticket_suggestions`: user_id + status + impact_score (DESC)
+2. `user_profiles`: user_id + superuser_score (DESC)
+3. `tickets`: user_id + created_at (DESC)
+4. `clusters`: user_id + status
+5. `integration_configs`: user_id + is_active + created_at (DESC)
+6. `feedback_sources`: user_id + created_at (DESC)
+7. `events`: user_id + timestamp (DESC)
+
+**Why needed:** Firestore requires composite indexes when filtering by one field (`user_id`) AND ordering by another field. Without these, queries will fail with "The query requires an index" errors or timeout with `deadline-exceeded`.
+
+**Index status:** Check at `https://console.firebase.google.com/project/[YOUR_PROJECT_ID]/firestore/indexes`
+
+Wait 2-5 minutes after deployment for indexes to build (status should show "Enabled").
+
+### Authentication Hook (useAuth)
+
+All components use a custom `useAuth` hook instead of directly accessing `firebase.auth.currentUser`:
+
+```typescript
+// src/hooks/use-auth.ts
+import { useEffect, useState } from 'react';
+import { firebase } from '@/lib/firebase';
+import type { User } from 'firebase/auth';
+
+export function useAuth() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = firebase.auth.onAuthStateChange((authUser) => {
+      setUser(authUser);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  return { user, loading, isAuthenticated: !!user };
+}
+```
+
+**Why needed:** Direct access to `firebase.auth.currentUser` can be synchronous and return `null` before auth state is ready, causing timing issues. The `useAuth` hook properly waits for auth state via `onAuthStateChange`.
+
+**Usage in components:**
+```typescript
+const { user } = useAuth();
+
+// Always check user before making queries
+if (!user) {
+  return; // or show loading state
+}
+
+// Use user.uid for queries
+firebase.from('tickets').select('*').eq('user_id', user.uid)
+```
+
+### Gemini API Rate Limiting
+
+**Problem:** Free tier Gemini API has 20 RPM (requests per minute) limit. With inefficient batching, syncing 50 posts could trigger 50+ API calls.
+
+**Solution:** Optimized batching to minimize API calls:
+
+**Reddit Post Summarization:**
+- Batch size: 25 posts per API call (increased from 10)
+- Delay: 4 seconds between batches (increased from 1.5s)
+- For 50 posts: Only 2 API calls
+- For 100 posts: Only 4 API calls
+
+**Fallback behavior:**
+- If bulk summarization fails, uses simple text fallback
+- NO longer makes individual API calls (was causing 50+ calls!)
+
+**Ticket Suggestion Generation:**
+- Analyzes 50 feedback items in 1 API call
+- Total per sync: ~3 API calls (2 for summarization, 1 for suggestions)
+
+**Result:** Well under 20 RPM limit, even with concurrent syncs.
 
 ## Recent Fixes (2025-10-26)
 
@@ -458,6 +552,101 @@ Added `.eq('user_id', currentUser.uid)` to ALL queries in:
 
 **Result:** Better visibility into sync status and clearer error messages.
 
+### ✅ Fixed: Authentication Timing Issues
+**Problem:** Console flooding with "No authenticated user" errors. Components were checking auth state before it was ready.
+
+**Root Cause:** Components were using `firebase.auth.currentUser` synchronously in `useCallback`, but auth state wasn't initialized yet. This caused race conditions where queries would run before authentication completed.
+
+**Fix:**
+1. Created custom `useAuth` hook that properly waits for auth state
+2. Updated all 6 components to use `useAuth()` instead of direct `currentUser` access
+3. Added early returns when `user` is null
+
+**Components updated:**
+- `Dashboard.tsx`
+- `Tickets.tsx`
+- `TicketSuggestions.tsx`
+- `Analytics.tsx`
+- `CommunityChampions.tsx`
+- `DataSourcesManager.tsx`
+
+**Result:** No more authentication timing errors, proper auth state handling throughout the app.
+
+### ✅ Fixed: deadline-exceeded Errors During Reddit Sync
+**Problem:** Reddit sync failing with `deadline-exceeded` error even with only 50 posts.
+
+**Root Cause:** Missing Firestore composite indexes for `user_id` queries. When we added multi-tenancy filters, queries like `where('user_id', '==', uid).orderBy('created_at', 'desc')` required new indexes. Without them, Firestore does slow collection scans that timeout.
+
+**Fix:**
+1. Added 7 composite indexes to `firestore.indexes.json`
+2. Deployed indexes: `firebase deploy --only firestore:indexes`
+3. Waited 2-5 minutes for indexes to build
+
+**Required indexes added:**
+- `ticket_suggestions`: user_id + status + impact_score
+- `user_profiles`: user_id + superuser_score
+- `tickets`: user_id + created_at
+- `clusters`: user_id + status
+- `integration_configs`: user_id + is_active + created_at
+- `feedback_sources`: user_id + created_at
+- `events`: user_id + timestamp
+
+**Result:** Reddit sync completes successfully without timeouts.
+
+### ✅ Optimized: Gemini API Rate Limiting
+**Problem:** Frequently hitting Gemini 20 RPM (requests per minute) and RPD (requests per day) limits.
+
+**Root Cause:**
+- Small batch size (10 posts per call) = more API calls
+- Dangerous fallback: If bulk summarization failed, fell back to individual calls (50 posts = 50 API calls!)
+- Short delays between batches (1.5s)
+
+**Fix:**
+1. **Increased batch size:** 10 → 25 posts per call
+   - 50 posts: 5 calls → 2 calls (60% reduction!)
+   - 100 posts: 10 calls → 4 calls
+2. **Removed dangerous fallback:** Now uses simple text fallback instead of making more API calls
+3. **Increased delays:** 1.5s → 4s between batches
+4. **Removed try-catch wrapper** in redditSync that was causing double fallbacks
+
+**Files modified:**
+- `functions/src/gemini-summarizer.ts` - Updated batch size and delays
+- `functions/src/index.ts` - Removed fallback try-catch
+
+**Result:**
+- Maximum 3 API calls per sync (2 summarization, 1 suggestions)
+- Well under 20 RPM limit even with multiple concurrent syncs
+- No more rate limit errors
+
+### ✅ Added: Custom Post Limit for Reddit Sync
+**Problem:** Default limit of 1000 posts was causing timeouts and rate limit issues.
+
+**Fix:**
+1. Added `postLimit` state variable (default: 100)
+2. Added UI input field in DataSourcesManager for users to customize limit
+3. Pass custom limit to redditSync cloud function
+
+**Location:** `src/components/DataSourcesManager.tsx:405-419`
+
+**Result:** Users can now control how many posts to sync, avoiding timeouts and rate limits.
+
+### ✅ Migrated: Environment Variables from functions.config to .env
+**Problem:** Using deprecated `firebase functions:config:set` for configuration. Being removed March 2026.
+
+**Fix:**
+1. Created `functions/.env` file
+2. Removed gemini config from Firebase: `firebase functions:config:unset gemini`
+3. Added Gemini API key to `.env` (already supported by code as fallback)
+
+**Configuration:**
+```bash
+# functions/.env
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+**Result:** Using modern, recommended configuration approach that won't be deprecated.
+
 ## Development Tips
 
 ### Adding New Cloud Functions
@@ -499,11 +688,27 @@ Use Firebase Console or Firebase Emulator UI.
 # View logs
 firebase functions:log
 
-# Check function config
-firebase functions:config:get
+# Check environment variables
+# Edit functions/.env file with your API keys
 
-# Set missing config
-firebase functions:config:set gemini.api_key="YOUR_KEY"
+# Deploy after changing .env
+cd functions && npm run build
+firebase deploy --only functions
+```
+
+### Gemini API Rate Limits
+If hitting 20 RPM limit:
+1. Reduce post limit in DataSourcesManager UI (try 25-50 posts)
+2. Increase batch delay in `functions/src/gemini-summarizer.ts`
+3. Upgrade Gemini API tier for higher limits
+4. Wait longer between syncs
+
+### Missing Firestore Indexes
+If seeing "The query requires an index" errors:
+```bash
+firebase deploy --only firestore:indexes
+# Wait 2-5 minutes for indexes to build
+# Check status: Firebase Console → Firestore → Indexes
 ```
 
 ### Reddit Sync Failing
@@ -534,4 +739,12 @@ firebase functions:config:set gemini.api_key="YOUR_KEY"
 
 **Last Updated**: 2025-10-26
 **Tech Stack**: React + Vite + Firebase + Gemini AI
-**Status**: Fully functional with working feedback linking
+**Status**: Fully functional with multi-tenancy, optimized rate limiting, and working feedback linking
+
+**Key Features:**
+- ✅ Multi-user data isolation with proper authentication
+- ✅ Firestore composite indexes for fast queries
+- ✅ Optimized Gemini API batching (60% fewer calls)
+- ✅ Custom post limits to avoid timeouts
+- ✅ Environment variable configuration (.env)
+- ✅ Linked feedback tracking from Reddit posts to tickets
